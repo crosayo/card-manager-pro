@@ -20,9 +20,6 @@ function InventoryPageContent() {
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 50;
   
-  // デフォルト: ID降順 (登録順)
-  // 解説: releaseDate順はクライアントサイド全件取得が必要で8秒かかるため、
-  // 初期表示は高速なID順（実質的な登録順＝最新順）を採用する。
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'id', direction: 'desc' });
   const [showZeroStock, setShowZeroStock] = useState(true);
   
@@ -40,7 +37,6 @@ function InventoryPageContent() {
     const loadData = async () => {
       setIsLoading(true);
       try {
-        // api.fetchItems handles the slow client-side sort if key is 'releaseDate'
         const result = await api.fetchItems(
           currentPage,
           pageSize,
@@ -71,7 +67,7 @@ function InventoryPageContent() {
     return () => clearTimeout(timer);
   }, [addToast, setIsLoading, currentPage, pageSize, selectedCategory, searchKeyword, sortConfig, showZeroStock]);
 
-  const handleSort = (key: keyof Item) => {
+  const handleSort = (key: keyof Item | 'releaseDate') => {
     setSortConfig(current => ({
       key,
       direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
@@ -79,7 +75,7 @@ function InventoryPageContent() {
     setCurrentPage(1);
   };
 
-  const setSortDirectly = (key: keyof Item, direction: 'asc' | 'desc') => {
+  const setSortDirectly = (key: keyof Item | 'releaseDate', direction: 'asc' | 'desc') => {
     setSortConfig({ key, direction });
     setCurrentPage(1);
   };
@@ -95,8 +91,7 @@ function InventoryPageContent() {
 
     try {
       const updatedItem = await api.updateStock(id, delta);
-      // 更新後もreleaseDateを維持するためにマージが必要 (apiからの返却値にはreleaseDateがないため)
-      setItems(prev => prev.map(item => item.id === id ? { ...updatedItem, releaseDate: item.releaseDate } : item));
+      setItems(prev => prev.map(item => item.id === id ? updatedItem : item));
     } catch (e: any) {
       setItems(oldItems);
       addToast('error', '在庫の更新に失敗しました', e.message);
@@ -107,7 +102,6 @@ function InventoryPageContent() {
     setIsLoading(true);
     try {
       const addedItem = await api.addItem(newItem);
-      // ソート順が複雑なため、リストをリロードする方が安全だがUXのために簡易追加
       setItems(prev => [addedItem, ...prev].slice(0, pageSize));
       setTotalCount(prev => prev + 1);
       addToast('success', '登録完了', `「${addedItem.name}」を追加しました。`);
@@ -122,8 +116,7 @@ function InventoryPageContent() {
     setIsLoading(true);
     try {
       const updatedItem = await api.updateItem(id, updates);
-      // releaseDateを維持して更新
-      setItems(prev => prev.map(item => item.id === id ? { ...updatedItem, releaseDate: item.releaseDate } : item));
+      setItems(prev => prev.map(item => item.id === id ? updatedItem : item));
       addToast('success', '更新完了', `「${updatedItem.name}」の情報を更新しました。`);
     } catch (e: any) {
       addToast('error', '更新失敗', e.message);

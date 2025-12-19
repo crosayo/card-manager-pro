@@ -11,7 +11,6 @@ const mapDbItemToAppItem = (dbItem: any): Item => ({
   rarity: dbItem.rarity,
   stock: dbItem.stock,
   category: dbItem.category,
-  releaseDate: dbItem.release_date, // DBにあれば使うが、今回の要件では基本undefined想定
   updatedAt: dbItem.updated_at || new Date().toISOString(),
 });
 
@@ -148,34 +147,34 @@ export const api = {
         const productMap = new Map(products.map(p => [p.name, p.releaseDate]));
 
         // 2. 全アイテム取得 (フィルタリングなしで全件)
-        // ※データ量が多い場合、ここで時間がかかります
         const allItems = await api.fetchAllItemsInternal();
 
         // 3. データ結合 & アプリケーション側でのフィルタリング
-        let filteredItems = allItems.map(item => ({
+        // 内部計算用に一時的に releaseDate を持つオブジェクトを作成
+        let itemsWithDate = allItems.map(item => ({
           ...item,
-          releaseDate: productMap.get(item.category) || '1999-01-01' // デフォルト日
+          releaseDate: productMap.get(item.category) || '1999-01-01'
         }));
 
         // Filter: Category
         if (filters?.category) {
-          filteredItems = filteredItems.filter(i => i.category === filters.category);
+          itemsWithDate = itemsWithDate.filter(i => i.category === filters.category);
         }
         // Filter: Search
         if (filters?.search) {
           const lowerSearch = filters.search.toLowerCase();
-          filteredItems = filteredItems.filter(i => 
+          itemsWithDate = itemsWithDate.filter(i => 
             i.name.toLowerCase().includes(lowerSearch) || 
             i.cardId.toLowerCase().includes(lowerSearch)
           );
         }
         // Filter: Zero Stock
         if (filters?.showZeroStock === false) {
-          filteredItems = filteredItems.filter(i => i.stock > 0);
+          itemsWithDate = itemsWithDate.filter(i => i.stock > 0);
         }
 
         // 4. ソート実行
-        filteredItems.sort((a, b) => {
+        itemsWithDate.sort((a, b) => {
           const dateA = new Date(a.releaseDate!).getTime();
           const dateB = new Date(b.releaseDate!).getTime();
           
@@ -189,13 +188,16 @@ export const api = {
           return 0;
         });
 
-        // 5. ページネーション切り出し
+        // 5. ページネーション切り出し & Item型への準拠（releaseDate削除）
         const from = (page - 1) * pageSize;
-        const slicedData = filteredItems.slice(from, from + pageSize);
+        const slicedData = itemsWithDate.slice(from, from + pageSize).map(i => {
+          const { releaseDate, ...itemWithoutDate } = i; // releaseDateを除去
+          return itemWithoutDate;
+        });
 
         return {
           data: slicedData,
-          count: filteredItems.length
+          count: itemsWithDate.length
         };
 
       } catch (e) {
@@ -289,9 +291,7 @@ export const api = {
         stock: newItem.stock,
         category: newItem.category,
     };
-    // release_dateカラムがあるか不明なため、今回はSQL改変禁止ルールに従い送らない
-    // (もしカラムが存在するなら送るべきだが、提供されたSQLにはない)
-
+    
     const { data, error } = await supabase
       .from('items')
       .insert([payload])

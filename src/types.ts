@@ -47,7 +47,7 @@ export type ToastType = {
 };
 
 export type SortConfig = {
-  key: keyof Item;
+  key: keyof Item | 'releaseDate'; // releaseDateはItemのプロパティではないがソートキーとしては許容
   direction: 'asc' | 'desc';
 };
 

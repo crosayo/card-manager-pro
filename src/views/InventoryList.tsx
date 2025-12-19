@@ -23,8 +23,8 @@ interface InventoryListProps {
   selectedCategory: string | null;
   products: Product[];
   sortConfig: SortConfig;
-  handleSort: (key: keyof Item) => void;
-  setSortDirectly?: (key: keyof Item, direction: 'asc' | 'desc') => void;
+  handleSort: (key: keyof Item | 'releaseDate') => void;
+  setSortDirectly?: (key: keyof Item | 'releaseDate', direction: 'asc' | 'desc') => void;
   updateStock: (id: number, delta: number) => Promise<void>;
   onAddItem: (item: Omit<Item, 'id' | 'updatedAt'>) => Promise<void>;
   onUpdateItem: (id: number, item: Partial<Item>) => Promise<void>;
@@ -71,7 +71,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
     cardId: '',
     rarity: 'N',
     stock: 0,
-    category: products[0]?.name || ''
+    category: products[0]?.name || '',
   });
 
   const totalPages = Math.ceil(totalCount / pageSize);
@@ -91,7 +91,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
       cardId: '',
       rarity: rarities[0] || 'N',
       stock: 0,
-      category: products[0]?.name || ''
+      category: products[0]?.name || '',
     });
     setIsModalOpen(true);
   };
@@ -107,7 +107,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
       cardId: item.cardId,
       rarity: item.rarity,
       stock: item.stock,
-      category: item.category
+      category: item.category,
     });
     setIsModalOpen(true);
   };
@@ -210,11 +210,15 @@ export const InventoryList: React.FC<InventoryListProps> = ({
       addToast('error', '入力エラー', 'カード名と型番は必須です。');
       return;
     }
+
+    const itemToSubmit = {
+      ...formData
+    };
     
     if (editingItem) {
-      await onUpdateItem(editingItem.id, formData);
+      await onUpdateItem(editingItem.id, itemToSubmit);
     } else {
-      await onAddItem(formData);
+      await onAddItem(itemToSubmit);
     }
     setIsModalOpen(false);
   };
@@ -327,8 +331,8 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                 <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg text-slate-700 cursor-pointer hover:bg-slate-100">
                   <ArrowUpDown size={14} />
                   <span>
-                    {sortConfig.key === 'id' && sortConfig.direction === 'desc' ? '最新登録 (発売日順)' :
-                     sortConfig.key === 'id' && sortConfig.direction === 'asc' ? '登録が古い順' :
+                    {sortConfig.key === 'releaseDate' && sortConfig.direction === 'desc' ? '最新パック順 (発売日)' :
+                     sortConfig.key === 'releaseDate' && sortConfig.direction === 'asc' ? '古いパック順 (発売日)' :
                      sortConfig.key === 'name' ? '名前順' :
                      sortConfig.key === 'cardId' ? '型番順' :
                      sortConfig.key === 'stock' ? '在庫数順' :
@@ -337,10 +341,10 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                 </div>
                 
                 {/* ドロップダウンメニュー */}
-                <div className="absolute top-full left-0 mt-1 w-48 bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden hidden group-hover:block z-20">
+                <div className="absolute top-full left-0 mt-1 w-52 bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden hidden group-hover:block z-20">
                    {setSortDirectly && (
                      <>
-                       <button onClick={() => setSortDirectly('id', 'desc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700 font-bold bg-slate-50">最新登録 (発売日順)</button>
+                       <button onClick={() => setSortDirectly('releaseDate', 'desc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700 font-bold bg-slate-50">最新パック順 (発売日)</button>
                        <button onClick={() => setSortDirectly('updatedAt', 'desc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700">更新が新しい順</button>
                        <button onClick={() => setSortDirectly('stock', 'desc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700">在庫が多い順</button>
                        <button onClick={() => setSortDirectly('stock', 'asc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700">在庫が少ない順</button>
@@ -354,14 +358,17 @@ export const InventoryList: React.FC<InventoryListProps> = ({
              {/* 在庫0トグル */}
              <button
               onClick={() => setShowZeroStock(!showZeroStock)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all duration-300 font-bold ${
                 showZeroStock
-                  ? 'bg-slate-50 text-slate-600 border-slate-200'
-                  : 'bg-slate-700 text-white border-slate-700'
+                  ? 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+                  : 'bg-amber-100 text-amber-700 border-amber-300 shadow-sm ring-2 ring-amber-500/20 animate-in zoom-in-95'
               }`}
              >
-               {showZeroStock ? <Eye size={14} /> : <EyeOff size={14} />}
-               <span>{showZeroStock ? '在庫0を表示' : '在庫0を隠す'}</span>
+               {showZeroStock ? <Eye size={14} /> : <EyeOff size={14} className="animate-pulse" />}
+               <span>{showZeroStock ? '在庫0を表示中' : '在庫0を非表示中'}</span>
+               {!showZeroStock && (
+                 <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full uppercase ml-1">Filtered</span>
+               )}
              </button>
           </div>
 
@@ -376,8 +383,6 @@ export const InventoryList: React.FC<InventoryListProps> = ({
         </div>
       </div>
       
-      {/* ... (残りのコードはそのまま) ... */}
-      {/* Table view etc */}
       {isLoading && (
         <div className="fixed inset-0 bg-white/50 backdrop-blur-sm z-40 flex items-center justify-center pointer-events-none">
           <div className="bg-white p-4 rounded-lg shadow-xl flex items-center gap-3 border border-slate-200">
@@ -407,12 +412,10 @@ export const InventoryList: React.FC<InventoryListProps> = ({
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-sm uppercase tracking-wider">
               {['releaseDate', 'cardId', 'name', 'rarity', 'stock', 'category'].map((key) => (
-                <th key={key} className="p-4 cursor-pointer hover:bg-slate-100 transition-colors group" onClick={key === 'releaseDate' ? undefined : () => handleSort(key as keyof Item)}>
+                <th key={key} className="p-4 cursor-pointer hover:bg-slate-100 transition-colors group" onClick={() => handleSort(key as any)}>
                   <div className="flex items-center gap-1">
                     {key === 'releaseDate' ? '発売日' : key === 'cardId' ? '型番' : key === 'name' ? 'カード名' : key === 'rarity' ? 'レア' : key === 'stock' ? '在庫' : '収録パック'}
-                    {key !== 'releaseDate' && (
-                        <ArrowUpDown size={14} className={`opacity-0 group-hover:opacity-100 ${sortConfig.key === key ? 'opacity-100 text-cyan-600' : ''}`} />
-                    )}
+                    <ArrowUpDown size={14} className={`opacity-0 group-hover:opacity-100 ${sortConfig.key === key ? 'opacity-100 text-cyan-600' : ''}`} />
                   </div>
                 </th>
               ))}
@@ -732,7 +735,10 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                   <label className="block text-sm font-bold text-slate-700 mb-1">収録パック / カテゴリ</label>
                   <select
                     value={formData.category}
-                    onChange={(e) => setFormData({...formData, category: e.target.value})}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormData({...formData, category: val});
+                    }}
                     className="w-full border border-slate-300 rounded px-3 py-2 focus:ring-2 focus:ring-cyan-500 outline-none"
                   >
                     {products.map(p => (
