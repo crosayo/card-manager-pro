@@ -2,6 +2,7 @@
 import { supabase, isSupabaseEnabled } from '../lib/supabase';
 import { Item, Product, PaginatedItems, SortConfig, Season, News } from '../types';
 import { INITIAL_RARITIES, INITIAL_SEASONS } from '../constants';
+import { normalizeCardName, getSearchTerm } from '../utils';
 
 // DBのマッピング
 const mapDbItemToAppItem = (dbItem: any): Item => ({
@@ -162,11 +163,22 @@ export const api = {
         }
         // Filter: Search
         if (filters?.search) {
-          const lowerSearch = filters.search.toLowerCase();
-          itemsWithDate = itemsWithDate.filter(i => 
-            i.name.toLowerCase().includes(lowerSearch) || 
-            i.cardId.toLowerCase().includes(lowerSearch)
-          );
+          const rawSearch = filters.search;
+          const normalizedSearch = getSearchTerm(filters.search);
+          const lowerRaw = rawSearch.toLowerCase();
+          const lowerNormalized = normalizedSearch.toLowerCase();
+
+          // メモリ上での検索なので、normalize同士で比較するのが確実
+          itemsWithDate = itemsWithDate.filter(i => {
+             const normName = normalizeCardName(i.name).toLowerCase();
+             const normCardId = normalizeCardName(i.cardId).toLowerCase();
+             
+             // 正規化後で一致するか、または生の入力で部分一致するか
+             return normName.includes(lowerNormalized) || 
+                    normName.includes(lowerRaw) ||
+                    normCardId.includes(lowerNormalized) ||
+                    normCardId.includes(lowerRaw);
+          });
         }
         // Filter: Zero Stock
         if (filters?.showZeroStock === false) {
@@ -214,7 +226,18 @@ export const api = {
       query = query.eq('category', filters.category);
     }
     if (filters?.search) {
-      query = query.or(`name.ilike.%${filters.search}%,card_id.ilike.%${filters.search}%`);
+      // 検索寛容化: 正規化された用語と、生の入力の両方で検索する
+      // DB側が正規化されていれば前者がヒット、されていなくても後者がヒットする可能性がある
+      const normalized = getSearchTerm(filters.search);
+      const raw = filters.search;
+      
+      // ILIKE は大文字小文字を無視するが、全角半角は区別する
+      // なので、OR条件で両パターンを含める
+      if (normalized !== raw) {
+        query = query.or(`name.ilike.%${raw}%,name.ilike.%${normalized}%,card_id.ilike.%${raw}%,card_id.ilike.%${normalized}%`);
+      } else {
+        query = query.or(`name.ilike.%${raw}%,card_id.ilike.%${raw}%`);
+      }
     }
     if (filters?.showZeroStock === false) {
       query = query.gt('stock', 0);
@@ -284,9 +307,10 @@ export const api = {
 
   addItem: async (newItem: Omit<Item, 'id' | 'updatedAt'>): Promise<Item> => {
     ensureConnection();
+    // 追加時に正規化とサニタイズを適用
     const payload: any = {
-        name: newItem.name,
-        card_id: newItem.cardId,
+        name: normalizeCardName(newItem.name),
+        card_id: normalizeCardName(newItem.cardId), // 型番も正規化（半角統一）
         rarity: newItem.rarity,
         stock: newItem.stock,
         category: newItem.category,
@@ -324,8 +348,9 @@ export const api = {
     const dbUpdates: any = {
       updated_at: new Date().toISOString()
     };
-    if (updates.name !== undefined) dbUpdates.name = updates.name;
-    if (updates.cardId !== undefined) dbUpdates.card_id = updates.cardId;
+    // 更新時も正規化
+    if (updates.name !== undefined) dbUpdates.name = normalizeCardName(updates.name);
+    if (updates.cardId !== undefined) dbUpdates.card_id = normalizeCardName(updates.cardId);
     if (updates.rarity !== undefined) dbUpdates.rarity = updates.rarity;
     if (updates.stock !== undefined) dbUpdates.stock = updates.stock;
     if (updates.category !== undefined) dbUpdates.category = updates.category;
@@ -346,12 +371,21 @@ export const api = {
     if (error) handleSupabaseError(error, 'deleteItem');
   },
 
-  // --- Bulk Operations (Migration & Stocktaking) ---
+  // --- Bulk Operations ---
   bulkInsertProducts: async (products: any[]): Promise<void> => {
     ensureConnection();
     const BATCH_SIZE = 500;
-    for (let i = 0; i < products.length; i += BATCH_SIZE) {
-      const chunk = products.slice(i, i + BATCH_SIZE);
+    
+    // DBのカラム名に変換
+    // 注意: created_at はDBスキーマによって存在しない場合があるため意図的に除外する
+    const dbProducts = products.map(p => ({
+      name: p.name,
+      release_date: p.release_date || p.releaseDate, // 両方の形式に対応
+      is_sidebar_visible: p.is_sidebar_visible !== undefined ? p.is_sidebar_visible : p.isSidebarVisible,
+    }));
+
+    for (let i = 0; i < dbProducts.length; i += BATCH_SIZE) {
+      const chunk = dbProducts.slice(i, i + BATCH_SIZE);
       const { error } = await supabase
         .from('products')
         .upsert(chunk, { onConflict: 'name', ignoreDuplicates: true });
@@ -362,12 +396,38 @@ export const api = {
   bulkInsertItems: async (items: any[]): Promise<void> => {
     ensureConnection();
     const BATCH_SIZE = 100;
-    for (let i = 0; i < items.length; i += BATCH_SIZE) {
-      const chunk = items.slice(i, i + BATCH_SIZE);
+    
+    // DBのカラム名に変換 & 正規化
+    const normalizedItems = items.map(item => ({
+      id: item.id, // バックアップからの復元時はIDを維持
+      name: normalizeCardName(item.name),
+      card_id: normalizeCardName(item.card_id || item.cardId),
+      rarity: item.rarity,
+      stock: item.stock,
+      category: item.category,
+      updated_at: item.updated_at || item.updatedAt || new Date().toISOString()
+    }));
+
+    for (let i = 0; i < normalizedItems.length; i += BATCH_SIZE) {
+      const chunk = normalizedItems.slice(i, i + BATCH_SIZE);
       const { error } = await supabase
         .from('items')
-        .upsert(chunk, { onConflict: 'id', ignoreDuplicates: true }); 
+        .upsert(chunk, { onConflict: 'id', ignoreDuplicates: false }); // ID重複時は更新(復元)
       if (error) handleSupabaseError(error, `bulkInsertItems (batch ${i})`);
+    }
+  },
+
+  restoreFromBackup: async (backupData: { products: any[], items: any[] }): Promise<void> => {
+    ensureConnection();
+    
+    // 1. 製品マスタの復元
+    if (backupData.products && Array.isArray(backupData.products)) {
+      await api.bulkInsertProducts(backupData.products);
+    }
+    
+    // 2. 在庫データの復元
+    if (backupData.items && Array.isArray(backupData.items)) {
+      await api.bulkInsertItems(backupData.items);
     }
   },
 
@@ -385,6 +445,44 @@ export const api = {
           .eq('id', item.id)
       ));
     }
+  },
+
+  // --- Data Normalization Maintenance ---
+  // 既存データの正規化（《》削除・半角統一）を行う
+  normalizeAllItems: async (onProgress?: (count: number) => void): Promise<number> => {
+    ensureConnection();
+    const allItems = await api.fetchAllItemsInternal();
+    let updateCount = 0;
+    const BATCH_SIZE = 50;
+
+    const updates = [];
+
+    for (const item of allItems) {
+      const normalizedName = normalizeCardName(item.name);
+      const normalizedCardId = normalizeCardName(item.cardId);
+
+      // 変化がある場合のみ更新対象にする
+      if (normalizedName !== item.name || normalizedCardId !== item.cardId) {
+        updates.push({
+          id: item.id,
+          name: normalizedName,
+          card_id: normalizedCardId,
+          updated_at: new Date().toISOString()
+        });
+      }
+    }
+
+    // バッチ更新
+    for (let i = 0; i < updates.length; i += BATCH_SIZE) {
+      const chunk = updates.slice(i, i + BATCH_SIZE);
+      await Promise.all(chunk.map(u => 
+        supabase.from('items').update(u).eq('id', u.id)
+      ));
+      updateCount += chunk.length;
+      if (onProgress) onProgress(updateCount);
+    }
+
+    return updateCount;
   },
 
   // --- Backup (Full Export) ---

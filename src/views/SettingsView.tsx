@@ -1,8 +1,8 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Settings, Shield, Loader2, Save, FileUp, Database, AlertCircle, CheckCircle2, List, Copy, Terminal, Download, Trash2, AlertTriangle, RefreshCw, Calendar, Plus } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Settings, Shield, Loader2, Save, FileUp, Database, AlertCircle, CheckCircle2, List, Copy, Terminal, Download, Trash2, AlertTriangle, RefreshCw, Calendar, Plus, Wand2, Upload } from 'lucide-react';
 import { api } from '../services/api';
 import { AppError, Season, ToastType } from '../types';
 import { useAppContext } from '../context/AppContext';
@@ -42,6 +42,9 @@ create table if not exists public.products (
   is_sidebar_visible boolean default true,
   created_at timestamptz default now()
 );
+
+-- もしカラムが足りない場合（エラー対策）
+alter table public.products add column if not exists created_at timestamptz default now();
 
 create table if not exists public.config (
   key text not null primary key,
@@ -154,8 +157,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const [isSaving, setIsSaving] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [backupProgress, setBackupProgress] = useState(0);
+
+  const [isRestoring, setIsRestoring] = useState(false);
+  const importFileRef = useRef<HTMLInputElement>(null);
+
+  // Normalization state
+  const [isNormalizing, setIsNormalizing] = useState(false);
+  const [normalizationCount, setNormalizationCount] = useState(0);
 
   useEffect(() => {
     setLocalRarities(rarities);
@@ -229,6 +240,60 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
+  const handleImportBackup = () => {
+    importFileRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!window.confirm(`「${file.name}」を復元しますか？\n既存のデータのうち、IDや製品名が一致するものは上書きされます。`)) {
+      e.target.value = '';
+      return;
+    }
+
+    setIsRestoring(true);
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target?.result as string;
+        const backupData = JSON.parse(text);
+
+        if (!backupData.products && !backupData.items) {
+          throw new Error('無効なバックアップファイル形式です');
+        }
+
+        await api.restoreFromBackup(backupData);
+        await refreshProducts();
+        addToast('success', '復元完了', 'バックアップからのデータ復元が完了しました。');
+      } catch (err: any) {
+        addToast('error', '復元失敗', err.message);
+      } finally {
+        setIsRestoring(false);
+        if (importFileRef.current) importFileRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleNormalization = async () => {
+    if (!window.confirm("全データの表記揺れ修正と記号(《》)削除を実行しますか？\n\n・全角英数 → 半角英数\n・半角カナ → 全角カナ\n・《》の削除\n\nこの処理はデータベース内の全アイテムを更新するため時間がかかる場合があります。")) {
+      return;
+    }
+    setIsNormalizing(true);
+    setNormalizationCount(0);
+    try {
+      const count = await api.normalizeAllItems((progress) => setNormalizationCount(progress));
+      addToast('success', '正規化完了', `${count}件のデータの表記揺れを修正しました。`);
+    } catch (e: any) {
+      addToast('error', '正規化失敗', e.message);
+    } finally {
+      setIsNormalizing(false);
+      setNormalizationCount(0);
+    }
+  };
+
   const handleResetData = async () => {
     if (!window.confirm("【警告】本当にすべてのデータを削除しますか？\n\nこの操作は元に戻せません。")) {
       return;
@@ -289,19 +354,61 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
 
-          {/* Backup */}
+          {/* Data Maintenance */}
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
             <h3 className="text-lg font-bold text-slate-700 mb-4 border-b pb-2 flex items-center gap-2">
-              <Download className="text-blue-600" /> バックアップ (Export)
+              <Wand2 className="text-purple-600" /> データメンテナンス
             </h3>
-            <button
-              onClick={handleBackup}
-              disabled={isBackingUp || globalLoading}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 disabled:opacity-50"
-            >
-              {isBackingUp ? <Loader2 className="animate-spin" size={18} /> : <FileUp size={18} />}
-              {isBackingUp ? `取得中... ${backupProgress}件` : 'バックアップファイルをダウンロード'}
-            </button>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-bold text-slate-700 mb-1">データの正規化と記号削除</p>
+                <p className="text-xs text-slate-500">全アイテムの「半角/全角統一」と「《》」の削除を一括で行います。<br/>検索ヒット率の向上に役立ちます。</p>
+              </div>
+              <button
+                onClick={handleNormalization}
+                disabled={isNormalizing || globalLoading}
+                className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 disabled:opacity-50 text-sm"
+              >
+                {isNormalizing ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+                {isNormalizing ? `処理中... ${normalizationCount}件` : '正規化を実行'}
+              </button>
+            </div>
+          </div>
+
+          {/* Backup & Restore */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h3 className="text-lg font-bold text-slate-700 mb-4 border-b pb-2 flex items-center gap-2">
+              <Database className="text-blue-600" /> バックアップと復元
+            </h3>
+            <div className="flex flex-col sm:flex-row gap-4">
+              <button
+                onClick={handleBackup}
+                disabled={isBackingUp || globalLoading}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isBackingUp ? <Loader2 className="animate-spin" size={18} /> : <Download size={18} />}
+                {isBackingUp ? `取得中... ${backupProgress}件` : 'バックアップ (Export)'}
+              </button>
+
+              <button
+                onClick={handleImportBackup}
+                disabled={isRestoring || globalLoading}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isRestoring ? <Loader2 className="animate-spin" size={18} /> : <Upload size={18} />}
+                {isRestoring ? '復元中...' : 'バックアップを復元 (Import)'}
+              </button>
+              <input 
+                type="file" 
+                ref={importFileRef}
+                onChange={handleFileChange}
+                accept=".json"
+                className="hidden"
+              />
+            </div>
+            <p className="text-xs text-slate-400 mt-2">
+              ※ バックアップファイル(.json)を読み込んでデータベースを復元します。IDが重複するデータは上書きされます。
+            </p>
           </div>
 
           {/* Seasons */}

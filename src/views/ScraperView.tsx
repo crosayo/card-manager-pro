@@ -6,6 +6,7 @@ import { Download, Zap, RefreshCw, Check, Loader2, Save, Trash2, Copy, Plus, Dat
 import { AppError, ToastType, Item } from '../types';
 import { api } from '../services/api';
 import { useAppContext } from '../context/AppContext';
+import { normalizeCardName } from '../utils';
 
 interface ScraperViewProps {
   isLoading: boolean;
@@ -73,10 +74,10 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
       }
 
       if (data.items && Array.isArray(data.items)) {
-        // 一時IDを付与
+        // 一時IDを付与 + 即座に正規化して表示
         const itemsWithIds: ScrapedItem[] = data.items.map((item: any) => ({
-          name: item.name || '',
-          cardId: item.cardId || '',
+          name: normalizeCardName(item.name || ''),
+          cardId: normalizeCardName(item.cardId || ''),
           rarity: item.rarity || 'N',
           stock: item.stock || 0,
           category: item.category || '',
@@ -160,9 +161,10 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
 
       let successCount = 0;
       for (const item of scrapedItems) {
+        // 保存時も念のためAPI側で正規化されるが、ここでも整えておく
         const itemToSave = {
-            name: item.name,
-            cardId: item.cardId,
+            name: normalizeCardName(item.name),
+            cardId: normalizeCardName(item.cardId),
             rarity: item.rarity,
             stock: item.stock,
             category: categoryName
