@@ -82,6 +82,7 @@ function InventoryPageContent() {
 
   const updateStock = async (id: number, delta: number) => {
     const oldItems = [...items];
+    // 楽観的UI更新: 即座に画面上の数値を変更する
     setItems(prev => prev.map(item => {
       if (item.id === id) {
         return { ...item, stock: Math.max(0, item.stock + delta) };
@@ -90,9 +91,12 @@ function InventoryPageContent() {
     }));
 
     try {
+      // RPC経由で安全に増減
       const updatedItem = await api.updateStock(id, delta);
+      // 成功時: サーバーからの正規の値を反映
       setItems(prev => prev.map(item => item.id === id ? updatedItem : item));
     } catch (e: any) {
+      // 失敗時: 元の状態に戻す
       setItems(oldItems);
       addToast('error', '在庫の更新に失敗しました', e.message);
     }

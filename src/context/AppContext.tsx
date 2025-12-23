@@ -19,16 +19,18 @@ interface AppContextType {
   refreshProducts: () => Promise<void>;
   refreshRarities: () => Promise<void>;
   refreshSeasons: () => Promise<void>;
-  refreshNews: () => Promise<void>; // Added
+  refreshNews: () => Promise<void>;
   addProduct: (product: Omit<Product, 'id'>) => Promise<void>;
   updateProduct: (id: string, updates: Partial<Product>) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
-  addNews: (news: Omit<News, 'id' | 'createdAt'>) => Promise<void>; // Added
-  deleteNews: (id: number) => Promise<void>; // Added
+  addNews: (news: Omit<News, 'id' | 'createdAt'>) => Promise<void>;
+  deleteNews: (id: number) => Promise<void>;
   addToast: (type: ToastType['type'], title: string, message?: string, errorDetail?: AppError) => void;
   removeToast: (id: number) => void;
   handleLoginToggle: () => Promise<void>;
   setIsLoading: (loading: boolean) => void;
+  setRarities: (rarities: string[]) => void; // Exposed
+  setSeasons: (seasons: Season[]) => void; // Exposed
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -38,7 +40,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [news, setNews] = useState<News[]>([]); // Initialize empty
+  const [news, setNews] = useState<News[]>([]);
   const [toasts, setToasts] = useState<ToastType[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [rarities, setRarities] = useState<string[]>(INITIAL_RARITIES);
@@ -174,7 +176,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
     refreshProducts();
     refreshRarities();
     refreshSeasons();
-    refreshNews(); // Added
+    refreshNews();
     return () => {
       authListener?.subscription.unsubscribe();
     };
@@ -193,16 +195,18 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       refreshProducts,
       refreshRarities,
       refreshSeasons,
-      refreshNews, // Added
+      refreshNews,
       addProduct,
       updateProduct,
       deleteProduct,
-      addNews, // Added
-      deleteNews, // Added
+      addNews,
+      deleteNews,
       addToast,
       removeToast,
       handleLoginToggle,
-      setIsLoading
+      setIsLoading,
+      setRarities,
+      setSeasons
     }}>
       {children}
     </AppContext.Provider>

@@ -2,10 +2,11 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Shield, Loader2, Save, FileUp, Database, AlertCircle, CheckCircle2, List, Copy, Terminal, Download, Trash2, AlertTriangle, RefreshCw, Calendar, Plus, Wand2, Upload } from 'lucide-react';
+import { Settings, Shield, Loader2, Save, FileUp, Database, AlertCircle, CheckCircle2, List, Copy, Terminal, Download, Trash2, AlertTriangle, RefreshCw, Calendar, Plus, Wand2, Upload, ArrowUp, ArrowDown, X } from 'lucide-react';
 import { api } from '../services/api';
 import { AppError, Season, ToastType } from '../types';
 import { useAppContext } from '../context/AppContext';
+import { INITIAL_RARITIES, INITIAL_SEASONS } from '../constants';
 
 interface SettingsViewProps {
   isAdmin: boolean;
@@ -141,6 +142,29 @@ begin
   return query select distinct i.rarity from public.items i order by i.rarity;
 end;
 $$;
+
+-- 9. RPC関数 (在庫安全更新)
+create or replace function public.increment_stock(item_id bigint, delta integer)
+returns json
+language plpgsql
+security definer
+as $$
+declare
+  updated_row record;
+begin
+  update public.items
+  set stock = greatest(0, stock + delta),
+      updated_at = now()
+  where id = item_id
+  returning id, name, card_id, rarity, stock, category, updated_at into updated_row;
+  
+  if not found then
+    raise exception 'Item not found';
+  end if;
+
+  return row_to_json(updated_row);
+end;
+$$;
 `;
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ 
@@ -148,11 +172,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   isLoading: globalLoading, 
   addToast 
 }) => {
-  const { rarities, refreshRarities, seasons, refreshSeasons, refreshProducts } = useAppContext();
+  const { rarities, refreshRarities, seasons, refreshSeasons, refreshProducts, setRarities, setSeasons } = useAppContext();
+  const [localRarities, setLocalRarities] = useState<string[]>(rarities);
   const [newRarity, setNewRarity] = useState("");
-  const [localRarities, setLocalRarities] = useState<string[]>([]);
   
-  const [localSeasons, setLocalSeasons] = useState<Season[]>([]);
+  const [localSeasons, setLocalSeasons] = useState<Season[]>(seasons);
   const [newSeasonData, setNewSeasonData] = useState({ name: '', startDate: '' });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -168,30 +192,99 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isNormalizing, setIsNormalizing] = useState(false);
   const [normalizationCount, setNormalizationCount] = useState(0);
 
+  // Sync state with context, but prevent overwriting user edits with default values if fetch fails or is slow
+  // 修正: リモートがデフォルト値以外（ロード済み）かつ、ローカルがデフォルト値（未編集）の場合のみ同期する
   useEffect(() => {
-    setLocalRarities(rarities);
-    setLocalSeasons(seasons);
-  }, [rarities, seasons]);
+    const isRemoteRarityDefault = JSON.stringify(rarities) === JSON.stringify(INITIAL_RARITIES);
+    const isLocalRarityDefault = JSON.stringify(localRarities) === JSON.stringify(INITIAL_RARITIES);
+
+    if (!isRemoteRarityDefault && isLocalRarityDefault) {
+      setLocalRarities(rarities);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rarities]); // localRaritiesを依存配列に含めると、編集した瞬間にリモートの値で上書きされる可能性があるため除外
+
+  useEffect(() => {
+    const isRemoteSeasonsDefault = JSON.stringify(seasons) === JSON.stringify(INITIAL_SEASONS);
+    const isLocalSeasonsDefault = JSON.stringify(localSeasons) === JSON.stringify(INITIAL_SEASONS);
+
+    if (!isRemoteSeasonsDefault && isLocalSeasonsDefault) {
+      setLocalSeasons(seasons);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seasons]);
 
   const copyToClipboard = (text: string, title: string) => {
     navigator.clipboard.writeText(text);
     addToast('success', 'コピーしました', `${title}をクリップボードにコピーしました。`);
   };
 
-  const saveConfig = async () => {
+  const saveRaritiesOnly = async () => {
     setIsSaving(true);
     try {
+      setRarities(localRarities); // Optimistic Update
       await api.saveRarities(localRarities);
+      addToast('success', '保存完了', 'レアリティ設定を保存しました。');
+    } catch (e: any) {
+      addToast('error', '保存失敗', e.message);
+      await refreshRarities(); // Revert on error
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const saveSeasonsOnly = async () => {
+    setIsSaving(true);
+    try {
+      setSeasons(localSeasons); // Optimistic Update
       await api.saveSeasons(localSeasons);
-      await refreshRarities();
-      await refreshSeasons();
-      addToast('success', '設定保存完了', 'システム設定をデータベースに保存しました。');
+      addToast('success', '保存完了', 'シーズン設定を保存しました。');
+    } catch (e: any) {
+      addToast('error', '保存失敗', e.message);
+      await refreshSeasons(); // Revert on error
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const saveAllConfig = async () => {
+    setIsSaving(true);
+    try {
+      setRarities(localRarities);
+      setSeasons(localSeasons);
+      await Promise.all([
+        api.saveRarities(localRarities),
+        api.saveSeasons(localSeasons)
+      ]);
+      addToast('success', '一括保存完了', 'システム設定をデータベースに保存しました。');
     } catch (e: any) {
       addToast('error', '設定の保存に失敗しました', e.message);
     } finally {
       setIsSaving(false);
     }
   };
+
+  // --- Rarity Management ---
+  const addRarity = () => {
+    if (!newRarity || localRarities.includes(newRarity)) return;
+    setLocalRarities([...localRarities, newRarity]);
+    setNewRarity("");
+  };
+
+  const removeRarity = (index: number) => {
+    setLocalRarities(localRarities.filter((_, i) => i !== index));
+  };
+
+  const moveRarity = (index: number, direction: 'up' | 'down') => {
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === localRarities.length - 1) return;
+    
+    const newItems = [...localRarities];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    [newItems[index], newItems[targetIndex]] = [newItems[targetIndex], newItems[index]];
+    setLocalRarities(newItems);
+  };
+  // ------------------------
 
   const addSeason = () => {
     if (!newSeasonData.name || !newSeasonData.startDate) {
@@ -312,9 +405,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto pb-24">
-      <h2 className="text-2xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-        <Settings /> システム設定
-      </h2>
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+          <Settings /> システム設定
+        </h2>
+        <button onClick={saveAllConfig} disabled={isSaving || globalLoading} className="bg-cyan-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-cyan-700 flex items-center gap-2 shadow-sm">
+          {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+          全体設定を保存
+        </button>
+      </div>
       
       {!isAdmin ? (
         <div className="bg-red-50 p-6 rounded-lg text-red-600 border border-red-200 flex items-center gap-3">
@@ -329,7 +428,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <AlertCircle /> データベース構成 (SQL)
             </h3>
             <p className="text-amber-700 mb-4 text-sm">
-              お知らせ機能対応・発売日順ソート対応のためのテーブル定義です。<br/>
+              在庫安全更新(RPC)、お知らせ機能、ソート対応のためのテーブル定義です。<br/>
               Supabaseの <b>SQL Editor</b> でこのスクリプトを実行してください。
             </p>
             <div className="relative bg-slate-900 rounded-lg p-4 mb-4 font-mono text-xs text-slate-300 h-64 overflow-y-auto custom-scrollbar border border-slate-700">
@@ -351,6 +450,132 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               >
                 <Terminal size={16} /> Supabase SQL Editorを開く
               </a>
+            </div>
+          </div>
+
+          {/* Rarity Settings (New) */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <div className="flex justify-between items-center mb-4 border-b pb-2">
+              <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2">
+                <List className="text-indigo-600" /> レアリティ定義
+              </h3>
+              <button 
+                onClick={saveRaritiesOnly} 
+                disabled={isSaving || globalLoading}
+                className="bg-indigo-600 text-white px-4 py-1.5 rounded-lg font-bold text-sm hover:bg-indigo-700 flex items-center gap-2 transition-colors disabled:opacity-50"
+              >
+                {isSaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+                変更を保存
+              </button>
+            </div>
+            <p className="text-sm text-slate-500 mb-4">
+              在庫の並び順（優先度）やドロップダウンの選択肢を管理します。<br/>
+              <b>上にあるものほど優先度が高くなります。</b>
+            </p>
+            <div className="flex flex-col md:flex-row gap-6">
+              <div className="flex-1 bg-slate-50 rounded-lg p-2 border border-slate-200 h-64 overflow-y-auto custom-scrollbar">
+                {localRarities.map((r, idx) => (
+                  <div key={r} className="flex items-center justify-between bg-white p-2 rounded mb-1 shadow-sm border border-slate-100">
+                    <span className="font-bold text-slate-700 px-2">{r}</span>
+                    <div className="flex gap-1">
+                      <button 
+                        onClick={() => moveRarity(idx, 'up')} 
+                        disabled={idx === 0}
+                        className="p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-600 disabled:opacity-20"
+                      >
+                        <ArrowUp size={16} />
+                      </button>
+                      <button 
+                        onClick={() => moveRarity(idx, 'down')} 
+                        disabled={idx === localRarities.length - 1}
+                        className="p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-600 disabled:opacity-20"
+                      >
+                        <ArrowDown size={16} />
+                      </button>
+                      <button 
+                        onClick={() => removeRarity(idx)}
+                        className="p-1 hover:bg-red-50 text-slate-400 hover:text-red-500 ml-1"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="md:w-64">
+                <label className="block text-sm font-bold text-slate-700 mb-2">新規追加</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    value={newRarity}
+                    onChange={(e) => setNewRarity(e.target.value.toUpperCase())}
+                    placeholder="例: QCSE"
+                    className="flex-1 border border-slate-300 rounded px-3 py-2 text-sm uppercase"
+                    onKeyDown={(e) => e.key === 'Enter' && addRarity()}
+                  />
+                  <button 
+                    onClick={addRarity}
+                    disabled={!newRarity}
+                    className="bg-indigo-600 text-white px-4 py-2 rounded font-bold hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    <Plus size={18} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Seasons */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+             <div className="flex justify-between items-center mb-4 border-b pb-2">
+              <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2">
+                <Calendar className="text-green-600" /> シーズン定義
+              </h3>
+              <button 
+                onClick={saveSeasonsOnly} 
+                disabled={isSaving || globalLoading}
+                className="bg-green-600 text-white px-4 py-1.5 rounded-lg font-bold text-sm hover:bg-green-700 flex items-center gap-2 transition-colors disabled:opacity-50"
+              >
+                {isSaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+                変更を保存
+              </button>
+            </div>
+            
+            <div className="flex flex-col md:flex-row gap-4 mb-4 items-end bg-slate-50 p-4 rounded-lg">
+              <input 
+                type="text" 
+                value={newSeasonData.name}
+                onChange={(e) => setNewSeasonData({ ...newSeasonData, name: e.target.value })}
+                placeholder="例: 第13期 (2025~)"
+                className="flex-1 border border-slate-300 rounded px-3 py-2 text-sm"
+              />
+              <input 
+                type="date" 
+                value={newSeasonData.startDate}
+                onChange={(e) => setNewSeasonData({ ...newSeasonData, startDate: e.target.value })}
+                className="w-full md:w-40 border border-slate-300 rounded px-3 py-2 text-sm"
+              />
+              <button onClick={addSeason} className="bg-green-600 text-white px-4 py-2 rounded font-bold hover:bg-green-700 flex items-center gap-2 shrink-0">
+                <Plus size={16} /> 追加
+              </button>
+            </div>
+            <div className="max-h-64 overflow-y-auto custom-scrollbar">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-slate-100 text-slate-500">
+                  <tr>
+                    <th className="p-2">シーズン名</th>
+                    <th className="p-2">開始日</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                   {localSeasons.map(s => (
+                     <tr key={s.id}>
+                       <td className="p-2">{s.name}</td>
+                       <td className="p-2 font-mono">{s.startDate}</td>
+                     </tr>
+                   ))}
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -409,37 +634,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <p className="text-xs text-slate-400 mt-2">
               ※ バックアップファイル(.json)を読み込んでデータベースを復元します。IDが重複するデータは上書きされます。
             </p>
-          </div>
-
-          {/* Seasons */}
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-            <h3 className="text-lg font-bold text-slate-700 mb-4 border-b pb-2 flex items-center gap-2">
-              <Calendar className="text-green-600" /> シーズン定義
-            </h3>
-            <div className="flex flex-col md:flex-row gap-4 mb-4 items-end bg-slate-50 p-4 rounded-lg">
-              <input 
-                type="text" 
-                value={newSeasonData.name}
-                onChange={(e) => setNewSeasonData({ ...newSeasonData, name: e.target.value })}
-                placeholder="例: 第13期 (2025~)"
-                className="flex-1 border border-slate-300 rounded px-3 py-2 text-sm"
-              />
-              <input 
-                type="date" 
-                value={newSeasonData.startDate}
-                onChange={(e) => setNewSeasonData({ ...newSeasonData, startDate: e.target.value })}
-                className="w-full md:w-40 border border-slate-300 rounded px-3 py-2 text-sm"
-              />
-              <button onClick={addSeason} className="bg-green-600 text-white px-4 py-2 rounded font-bold hover:bg-green-700 flex items-center gap-2 shrink-0">
-                <Plus size={16} /> 追加
-              </button>
-            </div>
-            <div className="flex justify-end mt-4">
-              <button onClick={saveConfig} disabled={isSaving || globalLoading} className="bg-cyan-600 text-white px-8 py-2 rounded-lg font-bold hover:bg-cyan-700 flex items-center gap-2">
-                {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-                設定を保存
-              </button>
-            </div>
           </div>
 
           {/* Danger Zone */}

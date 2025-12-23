@@ -146,11 +146,15 @@ export const api = {
         // 1. 全製品取得 (発売日データ用)
         const products = await api.fetchProducts();
         const productMap = new Map(products.map(p => [p.name, p.releaseDate]));
+        
+        // 2. レアリティ設定取得 (ソート用: ユーザー定義順)
+        const rarities = await api.fetchRarities();
+        const rarityMap = new Map(rarities.map((r, i) => [r, i]));
 
-        // 2. 全アイテム取得 (フィルタリングなしで全件)
+        // 3. 全アイテム取得 (フィルタリングなしで全件)
         const allItems = await api.fetchAllItemsInternal();
 
-        // 3. データ結合 & アプリケーション側でのフィルタリング
+        // 4. データ結合 & アプリケーション側でのフィルタリング
         // 内部計算用に一時的に releaseDate を持つオブジェクトを作成
         let itemsWithDate = allItems.map(item => ({
           ...item,
@@ -172,12 +176,15 @@ export const api = {
           itemsWithDate = itemsWithDate.filter(i => {
              const normName = normalizeCardName(i.name).toLowerCase();
              const normCardId = normalizeCardName(i.cardId).toLowerCase();
+             const normCategory = normalizeCardName(i.category).toLowerCase();
              
-             // 正規化後で一致するか、または生の入力で部分一致するか
+             // 正規化後で一致するか、または生の入力で部分一致するか (パック名も含める)
              return normName.includes(lowerNormalized) || 
                     normName.includes(lowerRaw) ||
                     normCardId.includes(lowerNormalized) ||
-                    normCardId.includes(lowerRaw);
+                    normCardId.includes(lowerRaw) ||
+                    normCategory.includes(lowerNormalized) ||
+                    normCategory.includes(lowerRaw);
           });
         }
         // Filter: Zero Stock
@@ -185,8 +192,9 @@ export const api = {
           itemsWithDate = itemsWithDate.filter(i => i.stock > 0);
         }
 
-        // 4. ソート実行
+        // 5. ソート実行
         itemsWithDate.sort((a, b) => {
+          // 第1ソート: 発売日
           const dateA = new Date(a.releaseDate!).getTime();
           const dateB = new Date(b.releaseDate!).getTime();
           
@@ -197,10 +205,14 @@ export const api = {
           if (a.cardId !== b.cardId) {
             return a.cardId.localeCompare(b.cardId);
           }
-          return 0;
+          // 第3ソート: レアリティ (設定された優先順位に従う)
+          const rankA = rarityMap.has(a.rarity) ? rarityMap.get(a.rarity)! : 999;
+          const rankB = rarityMap.has(b.rarity) ? rarityMap.get(b.rarity)! : 999;
+          
+          return rankA - rankB; // 小さいインデックス(上にあるもの)ほど優先
         });
 
-        // 5. ページネーション切り出し & Item型への準拠（releaseDate削除）
+        // 6. ページネーション切り出し & Item型への準拠（releaseDate削除）
         const from = (page - 1) * pageSize;
         const slicedData = itemsWithDate.slice(from, from + pageSize).map(i => {
           const { releaseDate, ...itemWithoutDate } = i; // releaseDateを除去
@@ -228,16 +240,23 @@ export const api = {
     if (filters?.search) {
       // 検索寛容化: 正規化された用語と、生の入力の両方で検索する
       // DB側が正規化されていれば前者がヒット、されていなくても後者がヒットする可能性がある
+      // パック名(category)も検索対象に追加
       const normalized = getSearchTerm(filters.search);
       const raw = filters.search;
       
-      // ILIKE は大文字小文字を無視するが、全角半角は区別する
-      // なので、OR条件で両パターンを含める
+      const conditions = [
+        `name.ilike.%${raw}%`,
+        `card_id.ilike.%${raw}%`,
+        `category.ilike.%${raw}%` // パック名検索対応
+      ];
+
       if (normalized !== raw) {
-        query = query.or(`name.ilike.%${raw}%,name.ilike.%${normalized}%,card_id.ilike.%${raw}%,card_id.ilike.%${normalized}%`);
-      } else {
-        query = query.or(`name.ilike.%${raw}%,card_id.ilike.%${raw}%`);
+        conditions.push(`name.ilike.%${normalized}%`);
+        conditions.push(`card_id.ilike.%${normalized}%`);
+        conditions.push(`category.ilike.%${normalized}%`); // パック名検索対応
       }
+      
+      query = query.or(conditions.join(','));
     }
     if (filters?.showZeroStock === false) {
       query = query.gt('stock', 0);
@@ -327,19 +346,33 @@ export const api = {
 
   updateStock: async (id: number, delta: number): Promise<Item> => {
     ensureConnection();
-    const { data: current } = await supabase.from('items').select('stock').eq('id', id).single();
-    const newStock = Math.max(0, (current?.stock || 0) + delta);
     
-    const { data, error } = await supabase
-      .from('items')
-      .update({ 
-        stock: newStock,
-        updated_at: new Date().toISOString() 
-      })
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) handleSupabaseError(error, 'updateStock');
+    // 安全性重視: RPCを使ったアトミックな更新 (連打対策)
+    // Supabase側で increment_stock(item_id, delta) 関数を定義する必要あり
+    const { data, error } = await supabase.rpc('increment_stock', { 
+      item_id: id, 
+      delta: delta 
+    });
+
+    if (error) {
+      // RPCがない場合のフォールバック (ただし連打安全性は劣る)
+      if (error.code === '42883') { // Undefined function
+         console.warn("RPC 'increment_stock' not found. Falling back to simple update.");
+         const { data: current } = await supabase.from('items').select('stock').eq('id', id).single();
+         const newStock = Math.max(0, (current?.stock || 0) + delta);
+         const { data: fallbackData, error: fallbackError } = await supabase
+           .from('items')
+           .update({ stock: newStock, updated_at: new Date().toISOString() })
+           .eq('id', id)
+           .select()
+           .single();
+         if (fallbackError) handleSupabaseError(fallbackError, 'updateStock(Fallback)');
+         return mapDbItemToAppItem(fallbackData);
+      }
+      handleSupabaseError(error, 'updateStock(RPC)');
+    }
+    
+    // RPCは更新後の行を返す前提
     return mapDbItemToAppItem(data);
   },
 
@@ -565,7 +598,10 @@ export const api = {
   saveRarities: async (rarities: string[]): Promise<void> => {
     ensureConnection();
     const { error } = await supabase.from('config').upsert({ key: 'rarities', value: rarities }, { onConflict: 'key' });
-    if (error) handleSupabaseError(error, 'saveRarities');
+    if (error) {
+      console.error("saveRarities error:", error);
+      handleSupabaseError(error, 'saveRarities');
+    }
   },
 
   fetchSeasons: async (): Promise<Season[]> => {
@@ -581,7 +617,10 @@ export const api = {
   saveSeasons: async (seasons: Season[]): Promise<void> => {
     ensureConnection();
     const { error } = await supabase.from('config').upsert({ key: 'seasons', value: seasons }, { onConflict: 'key' });
-    if (error) handleSupabaseError(error, 'saveSeasons');
+    if (error) {
+      console.error("saveSeasons error:", error);
+      handleSupabaseError(error, 'saveSeasons');
+    }
   },
 
   fetchDistinctRarities: async (): Promise<string[]> => {
