@@ -1,5 +1,5 @@
 
-import { Item, News, Product, Season } from './types';
+import { Item, News, Product, Season, SystemInfo } from './types';
 
 // 本番環境初期値: 空配列
 export const INITIAL_PRODUCTS: Product[] = [];
@@ -25,6 +25,12 @@ export const INITIAL_SEASONS: Season[] = [
   { id: 's2', name: '第2期 (2000~)', startDate: '2000-04-20' },
   { id: 's1', name: '第1期 (1999~)', startDate: '1999-02-04' },
 ];
+
+export const INITIAL_SYSTEM_INFO: SystemInfo = {
+  version: "4.5",
+  lastUpdated: new Date().toISOString().split('T')[0],
+  changelog: "初期リリース\n- ダッシュボード機能\n- 在庫管理機能\n- Wikiスクレイピング機能"
+};
 
 // 本番環境初期値: 空配列
 export const INITIAL_ITEMS: Item[] = [];

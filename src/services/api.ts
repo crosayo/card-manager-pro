@@ -1,7 +1,7 @@
 
 import { supabase, isSupabaseEnabled } from '../lib/supabase';
-import { Item, Product, PaginatedItems, SortConfig, Season, News } from '../types';
-import { INITIAL_RARITIES, INITIAL_SEASONS } from '../constants';
+import { Item, Product, PaginatedItems, SortConfig, Season, News, SystemInfo } from '../types';
+import { INITIAL_RARITIES, INITIAL_SEASONS, INITIAL_SYSTEM_INFO } from '../constants';
 import { normalizeCardName, getSearchTerm } from '../utils';
 
 // DBのマッピング
@@ -584,7 +584,7 @@ export const api = {
     return { totalCards: 0, totalStock: 0, lowStock: 0 };
   },
 
-  // --- Config (Rarities & Seasons) ---
+  // --- Config (Rarities, Seasons, SystemInfo) ---
   fetchRarities: async (): Promise<string[]> => {
     ensureConnection();
     const { data, error } = await supabase.from('config').select('value').eq('key', 'rarities').single();
@@ -620,6 +620,25 @@ export const api = {
     if (error) {
       console.error("saveSeasons error:", error);
       handleSupabaseError(error, 'saveSeasons');
+    }
+  },
+
+  fetchSystemInfo: async (): Promise<SystemInfo> => {
+    ensureConnection();
+    const { data, error } = await supabase.from('config').select('value').eq('key', 'system_info').single();
+    if (error) {
+      if (error.code === '42P01' || error.code === 'PGRST116') return INITIAL_SYSTEM_INFO;
+      // エラーは無視して初期値を返す
+    }
+    return data?.value || INITIAL_SYSTEM_INFO;
+  },
+
+  saveSystemInfo: async (info: SystemInfo): Promise<void> => {
+    ensureConnection();
+    const { error } = await supabase.from('config').upsert({ key: 'system_info', value: info }, { onConflict: 'key' });
+    if (error) {
+      console.error("saveSystemInfo error:", error);
+      handleSupabaseError(error, 'saveSystemInfo');
     }
   },
 

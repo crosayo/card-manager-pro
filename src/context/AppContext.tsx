@@ -3,9 +3,9 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { ToastType, AppError, News, Product, Season } from '@/types';
+import { ToastType, AppError, News, Product, Season, SystemInfo } from '@/types';
 import { api } from '@/services/api';
-import { INITIAL_RARITIES, INITIAL_SEASONS } from '@/constants';
+import { INITIAL_RARITIES, INITIAL_SEASONS, INITIAL_SYSTEM_INFO } from '@/constants';
 
 interface AppContextType {
   isAdmin: boolean;
@@ -15,11 +15,13 @@ interface AppContextType {
   toasts: ToastType[];
   products: Product[];
   rarities: string[];
-  seasons: Season[]; 
+  seasons: Season[];
+  systemInfo: SystemInfo; 
   refreshProducts: () => Promise<void>;
   refreshRarities: () => Promise<void>;
   refreshSeasons: () => Promise<void>;
   refreshNews: () => Promise<void>;
+  refreshSystemInfo: () => Promise<void>;
   addProduct: (product: Omit<Product, 'id'>) => Promise<void>;
   updateProduct: (id: string, updates: Partial<Product>) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
@@ -29,8 +31,9 @@ interface AppContextType {
   removeToast: (id: number) => void;
   handleLoginToggle: () => Promise<void>;
   setIsLoading: (loading: boolean) => void;
-  setRarities: (rarities: string[]) => void; // Exposed
-  setSeasons: (seasons: Season[]) => void; // Exposed
+  setRarities: (rarities: string[]) => void;
+  setSeasons: (seasons: Season[]) => void;
+  saveSystemInfo: (info: SystemInfo) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -45,6 +48,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [rarities, setRarities] = useState<string[]>(INITIAL_RARITIES);
   const [seasons, setSeasons] = useState<Season[]>(INITIAL_SEASONS);
+  const [systemInfo, setSystemInfo] = useState<SystemInfo>(INITIAL_SYSTEM_INFO);
 
   const addToast = useCallback((type: ToastType['type'], title: string, message?: string, errorDetail?: AppError) => {
     const id = Date.now();
@@ -91,6 +95,15 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       setNews(fetched);
     } catch (e) {
       console.error("Failed to fetch news", e);
+    }
+  }, []);
+
+  const refreshSystemInfo = useCallback(async () => {
+    try {
+      const info = await api.fetchSystemInfo();
+      setSystemInfo(info);
+    } catch (e) {
+      console.error("Failed to fetch system info", e);
     }
   }, []);
 
@@ -149,6 +162,17 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  const saveSystemInfoState = async (info: SystemInfo) => {
+    try {
+      setSystemInfo(info);
+      await api.saveSystemInfo(info);
+      addToast('success', '設定保存', 'システム情報を更新しました');
+    } catch (e: any) {
+      addToast('error', '保存失敗', e.message);
+      throw e;
+    }
+  };
+
   const handleLoginToggle = async () => {
     setIsLoading(true);
     try {
@@ -177,10 +201,11 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
     refreshRarities();
     refreshSeasons();
     refreshNews();
+    refreshSystemInfo();
     return () => {
       authListener?.subscription.unsubscribe();
     };
-  }, [refreshProducts, refreshRarities, refreshSeasons, refreshNews]);
+  }, [refreshProducts, refreshRarities, refreshSeasons, refreshNews, refreshSystemInfo]);
 
   return (
     <AppContext.Provider value={{
@@ -192,10 +217,12 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       products,
       rarities,
       seasons,
+      systemInfo,
       refreshProducts,
       refreshRarities,
       refreshSeasons,
       refreshNews,
+      refreshSystemInfo,
       addProduct,
       updateProduct,
       deleteProduct,
@@ -206,7 +233,8 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       handleLoginToggle,
       setIsLoading,
       setRarities,
-      setSeasons
+      setSeasons,
+      saveSystemInfo: saveSystemInfoState
     }}>
       {children}
     </AppContext.Provider>

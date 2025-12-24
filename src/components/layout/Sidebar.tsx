@@ -4,7 +4,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Database, X, LayoutDashboard, Layers, Menu, Download, Settings, LogOut, LogIn, Calendar, ChevronDown, ChevronRight, Folder } from 'lucide-react';
+import { Database, X, LayoutDashboard, Layers, Menu, Download, Settings, LogOut, LogIn, Calendar, ChevronDown, ChevronRight, Folder, Info } from 'lucide-react';
 import { Product, TabType, Season } from '@/types';
 import { useAppContext } from '@/context/AppContext';
 
@@ -28,8 +28,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   selectedCategory,
 }) => {
   const pathname = usePathname();
-  const { seasons } = useAppContext();
+  const { seasons, systemInfo } = useAppContext();
   const [expandedSeasons, setExpandedSeasons] = useState<Record<string, boolean>>({});
+  const [isChangelogOpen, setIsChangelogOpen] = useState(false);
 
   // adminOnly: true の項目はゲストには非表示
   const menuItems: { id: TabType; path: string; icon: any; label: string; adminOnly: boolean }[] = [
@@ -80,7 +81,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   useEffect(() => {
     if (selectedCategory) {
-      for (const [seasonName, prods] of Object.entries(groupedProducts)) {
+      for (const [seasonName, prods] of Object.entries(groupedProducts) as [string, Product[]][]) {
         if (prods.some(p => p.name === selectedCategory)) {
           setExpandedSeasons(prev => ({ ...prev, [seasonName]: true }));
           break;
@@ -125,7 +126,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Database size={24} />
               <span>Card Manager</span>
             </h1>
-            <p className="text-xs text-slate-400 mt-1 group-hover:text-slate-300 transition-colors">Ver 4.5</p>
+            <button 
+              onClick={(e) => {
+                e.preventDefault();
+                setIsChangelogOpen(true);
+              }}
+              className="text-xs text-slate-400 mt-1 hover:text-white transition-colors flex items-center gap-1"
+            >
+              Ver {systemInfo.version}
+              <Info size={10} />
+            </button>
           </Link>
           <button 
             onClick={() => setIsMobileMenuOpen(false)} 
@@ -274,6 +284,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
       </div>
+
+      {/* 更新履歴モーダル */}
+      {isChangelogOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[80vh] flex flex-col">
+            <div className="p-5 border-b flex justify-between items-center bg-slate-50 rounded-t-xl">
+              <h3 className="text-lg font-bold flex items-center gap-2">
+                <Info size={20} className="text-cyan-600" />
+                システム更新情報
+              </h3>
+              <button onClick={() => setIsChangelogOpen(false)} className="text-slate-400 hover:text-slate-600">
+                <X size={24} />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto">
+              <div className="mb-4">
+                <span className="text-2xl font-bold text-slate-800">Ver {systemInfo.version}</span>
+                <span className="ml-3 text-sm text-slate-500">Last Updated: {systemInfo.lastUpdated}</span>
+              </div>
+              <div className="prose prose-sm text-slate-600 whitespace-pre-wrap leading-relaxed">
+                {systemInfo.changelog}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

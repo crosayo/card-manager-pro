@@ -1,3 +1,4 @@
+
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI, Type } from "@google/genai";
 
@@ -47,6 +48,9 @@ export async function POST(req: NextRequest) {
            - Prismatic -> PS
         4. stockは初期値として0を設定してください。
         5. categoryはページタイトルや内容から推測されるパック名を設定してください（例: "ストラクチャーデッキ－青眼龍轟臨－"）。
+        6. 重要: 1つの行に複数のレアリティが記載されている場合（例: "ウルトラ、シークレット" や "UR, SE"）、
+           それぞれのレアリティについて独立したJSONオブジェクトを生成してください。
+           つまり、同じカード名・型番でレアリティだけが異なるオブジェクトを複数作成してリストに含めてください。
         
         HTML:
         ${truncatedHtml}

@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Eye, EyeOff, Search, Plus, Loader2, Filter, ArrowUpDown, Edit3, Trash2, X, Save, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, ExternalLink, Upload, ChevronsLeft, ChevronsRight, Calendar } from 'lucide-react';
+import { Eye, EyeOff, Search, Plus, Loader2, Filter, ArrowUpDown, Edit3, Trash2, X, Save, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, ExternalLink, Upload, ChevronsLeft, ChevronsRight, Calendar, ChevronDown } from 'lucide-react';
 import { Item, News, Product, SortConfig, AppError, ToastType } from '@/types';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/services/api';
@@ -61,6 +61,9 @@ export const InventoryList: React.FC<InventoryListProps> = ({
   const { rarities } = useAppContext();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
+  
+  // Sort Dropdown State
+  const [isSortOpen, setIsSortOpen] = useState(false);
   
   // CSV Import State
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -246,6 +249,13 @@ export const InventoryList: React.FC<InventoryListProps> = ({
   const prev5 = () => setCurrentPage(Math.max(1, currentPage - 5));
   const next5 = () => setCurrentPage(Math.min(totalPages, currentPage + 5));
 
+  const applySort = (key: keyof Item | 'releaseDate', direction: 'asc' | 'desc') => {
+    if (setSortDirectly) {
+      setSortDirectly(key, direction);
+      setIsSortOpen(false);
+    }
+  };
+
   return (
     <div className="p-4 md:p-8 pb-20">
       {/* 閲覧専用バナー */}
@@ -325,35 +335,46 @@ export const InventoryList: React.FC<InventoryListProps> = ({
         
         {/* 下段: フィルターとソート */}
         <div className="flex flex-col sm:flex-row gap-2 justify-between items-start sm:items-center text-sm border-t border-slate-100 pt-3">
-          <div className="flex gap-2 items-center w-full sm:w-auto">
-             {/* ソートドロップダウン */}
-             <div className="relative group">
-                <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg text-slate-700 cursor-pointer hover:bg-slate-100">
-                  <ArrowUpDown size={14} />
-                  <span>
-                    {sortConfig.key === 'releaseDate' && sortConfig.direction === 'desc' ? '最新パック順 (発売日)' :
-                     sortConfig.key === 'releaseDate' && sortConfig.direction === 'asc' ? '古いパック順 (発売日)' :
-                     sortConfig.key === 'name' ? '名前順' :
-                     sortConfig.key === 'cardId' ? '型番順' :
-                     sortConfig.key === 'stock' ? '在庫数順' :
-                     sortConfig.key === 'updatedAt' ? '更新が新しい順' : '並び替え'}
-                  </span>
-                </div>
+          <div className="flex gap-2 items-center w-full sm:w-auto relative">
+             {/* ソートボタン (クリック式) */}
+             <button
+               onClick={() => setIsSortOpen(!isSortOpen)}
+               className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg text-slate-700 hover:bg-slate-100 transition-colors"
+             >
+               <ArrowUpDown size={14} />
+               <span>
+                  {sortConfig.key === 'releaseDate' && sortConfig.direction === 'desc' ? '発売日が新しい順' :
+                   sortConfig.key === 'releaseDate' && sortConfig.direction === 'asc' ? '発売日が古い順' :
+                   sortConfig.key === 'cardId' && sortConfig.direction === 'asc' ? '型番順 (A → Z)' :
+                   sortConfig.key === 'cardId' && sortConfig.direction === 'desc' ? '型番順 (Z → A)' :
+                   sortConfig.key === 'stock' && sortConfig.direction === 'desc' ? '在庫が多い順' :
+                   sortConfig.key === 'stock' && sortConfig.direction === 'asc' ? '在庫が少ない順' :
+                   sortConfig.key === 'updatedAt' && sortConfig.direction === 'desc' ? '更新が新しい順' : '並び替え'}
+               </span>
+               <ChevronDown size={14} className={`transition-transform duration-200 ${isSortOpen ? 'rotate-180' : ''}`} />
+             </button>
                 
-                {/* ドロップダウンメニュー */}
-                <div className="absolute top-full left-0 mt-1 w-52 bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden hidden group-hover:block z-20">
-                   {setSortDirectly && (
-                     <>
-                       <button onClick={() => setSortDirectly('releaseDate', 'desc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700 font-bold bg-slate-50">最新パック順 (発売日)</button>
-                       <button onClick={() => setSortDirectly('updatedAt', 'desc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700">更新が新しい順</button>
-                       <button onClick={() => setSortDirectly('stock', 'desc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700">在庫が多い順</button>
-                       <button onClick={() => setSortDirectly('stock', 'asc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700">在庫が少ない順</button>
-                       <button onClick={() => setSortDirectly('name', 'asc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700">名前順</button>
-                       <button onClick={() => setSortDirectly('cardId', 'asc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700">型番順</button>
-                     </>
-                   )}
-                </div>
-             </div>
+             {/* ドロップダウンメニュー (クリックで開閉) */}
+             {isSortOpen && setSortDirectly && (
+               <>
+                 {/* 閉じるためのオーバーレイ */}
+                 <div className="fixed inset-0 z-20 cursor-default" onClick={() => setIsSortOpen(false)}></div>
+                 <div className="absolute top-full left-0 mt-1 w-56 bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden z-30 animate-in fade-in zoom-in-95 duration-100">
+                   <div className="py-1">
+                     <button onClick={() => applySort('releaseDate', 'desc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700 text-sm">発売日が新しい順</button>
+                     <button onClick={() => applySort('releaseDate', 'asc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700 text-sm">発売日が古い順</button>
+                     <div className="border-t border-slate-100 my-1"></div>
+                     <button onClick={() => applySort('cardId', 'asc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700 text-sm">型番順 (A → Z)</button>
+                     <button onClick={() => applySort('cardId', 'desc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700 text-sm">型番順 (Z → A)</button>
+                     <div className="border-t border-slate-100 my-1"></div>
+                     <button onClick={() => applySort('stock', 'desc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700 text-sm">在庫が多い順</button>
+                     <button onClick={() => applySort('stock', 'asc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700 text-sm">在庫が少ない順</button>
+                     <div className="border-t border-slate-100 my-1"></div>
+                     <button onClick={() => applySort('updatedAt', 'desc')} className="w-full text-left px-4 py-2 hover:bg-cyan-50 text-slate-700 text-sm">更新が新しい順</button>
+                   </div>
+                 </div>
+               </>
+             )}
 
              {/* 在庫0トグル */}
              <button

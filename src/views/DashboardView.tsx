@@ -63,7 +63,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ stats }) => {
           <div className="bg-cyan-600 p-2 rounded-lg text-white">
             <LayoutDashboard size={24} />
           </div>
-          業務ダッシュボード
+          ダッシュボード
         </h2>
         <div className="text-xs font-mono text-slate-400 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
           SYSTEM: ONLINE

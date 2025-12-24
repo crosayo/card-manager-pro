@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Shield, Loader2, Save, FileUp, Database, AlertCircle, CheckCircle2, List, Copy, Terminal, Download, Trash2, AlertTriangle, RefreshCw, Calendar, Plus, Wand2, Upload, ArrowUp, ArrowDown, X } from 'lucide-react';
+import { Settings, Shield, Loader2, Save, FileUp, Database, AlertCircle, CheckCircle2, List, Copy, Terminal, Download, Trash2, AlertTriangle, RefreshCw, Calendar, Plus, Wand2, Upload, ArrowUp, ArrowDown, X, Monitor } from 'lucide-react';
 import { api } from '../services/api';
 import { AppError, Season, ToastType } from '../types';
 import { useAppContext } from '../context/AppContext';
@@ -172,12 +172,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   isLoading: globalLoading, 
   addToast 
 }) => {
-  const { rarities, refreshRarities, seasons, refreshSeasons, refreshProducts, setRarities, setSeasons } = useAppContext();
+  const { rarities, refreshRarities, seasons, refreshSeasons, refreshProducts, setRarities, setSeasons, systemInfo, saveSystemInfo } = useAppContext();
   const [localRarities, setLocalRarities] = useState<string[]>(rarities);
   const [newRarity, setNewRarity] = useState("");
   
   const [localSeasons, setLocalSeasons] = useState<Season[]>(seasons);
   const [newSeasonData, setNewSeasonData] = useState({ name: '', startDate: '' });
+
+  // System Info State
+  const [localSystemInfo, setLocalSystemInfo] = useState(systemInfo);
 
   const [isSaving, setIsSaving] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
@@ -192,8 +195,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isNormalizing, setIsNormalizing] = useState(false);
   const [normalizationCount, setNormalizationCount] = useState(0);
 
-  // Sync state with context, but prevent overwriting user edits with default values if fetch fails or is slow
-  // 修正: リモートがデフォルト値以外（ロード済み）かつ、ローカルがデフォルト値（未編集）の場合のみ同期する
+  // Sync state with context
   useEffect(() => {
     const isRemoteRarityDefault = JSON.stringify(rarities) === JSON.stringify(INITIAL_RARITIES);
     const isLocalRarityDefault = JSON.stringify(localRarities) === JSON.stringify(INITIAL_RARITIES);
@@ -202,7 +204,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setLocalRarities(rarities);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rarities]); // localRaritiesを依存配列に含めると、編集した瞬間にリモートの値で上書きされる可能性があるため除外
+  }, [rarities]);
 
   useEffect(() => {
     const isRemoteSeasonsDefault = JSON.stringify(seasons) === JSON.stringify(INITIAL_SEASONS);
@@ -213,6 +215,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seasons]);
+
+  useEffect(() => {
+     if (systemInfo.version !== localSystemInfo.version) {
+       setLocalSystemInfo(systemInfo);
+     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [systemInfo]);
 
   const copyToClipboard = (text: string, title: string) => {
     navigator.clipboard.writeText(text);
@@ -246,6 +255,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setIsSaving(false);
     }
   };
+  
+  const saveSystemInfoOnly = async () => {
+    setIsSaving(true);
+    try {
+      await saveSystemInfo(localSystemInfo);
+    } catch (e: any) {
+      // toast is handled in context
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const saveAllConfig = async () => {
     setIsSaving(true);
@@ -254,7 +274,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setSeasons(localSeasons);
       await Promise.all([
         api.saveRarities(localRarities),
-        api.saveSeasons(localSeasons)
+        api.saveSeasons(localSeasons),
+        api.saveSystemInfo(localSystemInfo)
       ]);
       addToast('success', '一括保存完了', 'システム設定をデータベースに保存しました。');
     } catch (e: any) {
@@ -315,7 +336,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         products,
         items,
         exportDate: new Date().toISOString(),
-        version: "4.5"
+        version: localSystemInfo.version
       };
       const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -450,6 +471,53 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               >
                 <Terminal size={16} /> Supabase SQL Editorを開く
               </a>
+            </div>
+          </div>
+          
+           {/* System Version & Changelog */}
+           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <div className="flex justify-between items-center mb-4 border-b pb-2">
+              <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2">
+                <Monitor className="text-slate-600" /> バージョン管理
+              </h3>
+              <button 
+                onClick={saveSystemInfoOnly} 
+                disabled={isSaving || globalLoading}
+                className="bg-slate-600 text-white px-4 py-1.5 rounded-lg font-bold text-sm hover:bg-slate-700 flex items-center gap-2 transition-colors disabled:opacity-50"
+              >
+                {isSaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+                変更を保存
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">バージョン番号</label>
+                <input 
+                  type="text" 
+                  value={localSystemInfo.version}
+                  onChange={(e) => setLocalSystemInfo({...localSystemInfo, version: e.target.value})}
+                  className="w-full border border-slate-300 rounded px-3 py-2 text-sm"
+                  placeholder="4.5"
+                />
+              </div>
+              <div>
+                 <label className="block text-sm font-bold text-slate-700 mb-2">最終更新日</label>
+                 <input 
+                  type="date" 
+                  value={localSystemInfo.lastUpdated}
+                  onChange={(e) => setLocalSystemInfo({...localSystemInfo, lastUpdated: e.target.value})}
+                  className="w-full border border-slate-300 rounded px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="md:col-span-2">
+                 <label className="block text-sm font-bold text-slate-700 mb-2">更新ログ (改行で区切る)</label>
+                 <textarea 
+                  value={localSystemInfo.changelog}
+                  onChange={(e) => setLocalSystemInfo({...localSystemInfo, changelog: e.target.value})}
+                  className="w-full border border-slate-300 rounded px-3 py-2 text-sm h-32"
+                  placeholder="更新内容を入力..."
+                />
+              </div>
             </div>
           </div>
 

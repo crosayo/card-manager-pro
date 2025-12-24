@@ -31,6 +31,12 @@ export type Season = {
   startDate: string; // YYYY-MM-DD
 };
 
+export type SystemInfo = {
+  version: string;
+  lastUpdated: string;
+  changelog: string;
+};
+
 export type AppError = {
   code: string;
   message: string;

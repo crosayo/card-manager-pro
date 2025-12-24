@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { LucideIcon } from 'lucide-react';
 
@@ -10,7 +11,7 @@ interface StatsWidgetProps {
 }
 
 export const StatsWidget: React.FC<StatsWidgetProps> = ({ label, value, icon: Icon, color, subtext }) => (
-  <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-start gap-4 hover:shadow-md transition-shadow">
+  <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-start gap-4 cursor-default">
     <div className={`p-3 rounded-lg ${color} bg-opacity-10 text-white`}>
       <Icon size={24} className={color.replace('bg-', 'text-')} />
     </div>

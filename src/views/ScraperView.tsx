@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Download, Zap, RefreshCw, Check, Loader2, Save, Trash2, Copy, Plus, Database, ArrowRight, Bookmark } from 'lucide-react';
+import { Download, Zap, RefreshCw, Check, Loader2, Save, Trash2, Copy, Plus, Database, ArrowRight, Bookmark, AlertTriangle, ArrowRightCircle } from 'lucide-react';
 import { AppError, ToastType, Item } from '../types';
 import { api } from '../services/api';
 import { useAppContext } from '../context/AppContext';
@@ -18,6 +18,15 @@ interface ScrapedItem extends Omit<Item, 'id' | 'updatedAt'> {
   _tempId: string;
 }
 
+// 競合解決用の型
+type ResolutionType = 'merge' | 'overwrite' | 'skip';
+interface ConflictItem {
+  tempId: string;
+  newItem: ScrapedItem;
+  existingItem: Item;
+  resolution: ResolutionType;
+}
+
 // 最新パックのプリセット（構築用）
 const PRESET_PACKS = [
   { name: 'SUPREME DARKNESS (2024)', url: 'https://yugioh-wiki.net/index.php?SUPREME%20DARKNESS' },
@@ -30,7 +39,7 @@ const PRESET_PACKS = [
 ];
 
 export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoading, addToast }) => {
-  const { products, refreshProducts, rarities } = useAppContext(); // raritiesを取得
+  const { products, refreshProducts, rarities } = useAppContext();
   const [url, setUrl] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   
@@ -44,6 +53,12 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
     name: '', 
     releaseDate: new Date().toISOString().split('T')[0]
   });
+
+  // 競合解決モーダルの状態
+  const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
+  const [conflicts, setConflicts] = useState<ConflictItem[]>([]);
+  const [safeItems, setSafeItems] = useState<ScrapedItem[]>([]);
+  const [isProcessingConflicts, setIsProcessingConflicts] = useState(false);
 
   const loadPreset = (presetUrl: string) => {
     setUrl(presetUrl);
@@ -122,7 +137,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
     }
   };
 
-  const handleImport = async () => {
+  const prepareImport = async () => {
     if (scrapedItems.length === 0) return;
     
     if (productMode === 'existing' && !selectedProductId) {
@@ -134,12 +149,56 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
        return;
     }
 
-    if (!window.confirm(`${scrapedItems.length}件のデータを登録しますか？`)) {
-      return;
-    }
-
     setImportStatus('importing');
     
+    // 既存データ取得して重複チェック (バックアップ用APIを流用して全件取得)
+    try {
+      const allExistingItems = await api.fetchAllItemsForBackup();
+      
+      const conflictList: ConflictItem[] = [];
+      const safeList: ScrapedItem[] = [];
+
+      for (const newItem of scrapedItems) {
+        // カード名と型番が一致するものを探す（レアリティは一旦不問にするか、レアリティも含めるか。
+        // 要件：①同じカード名で型番が同じものがあるかチェック（レアリティ不問）
+        const match = allExistingItems.find(
+          existing => 
+            normalizeCardName(existing.name) === normalizeCardName(newItem.name) && 
+            normalizeCardName(existing.cardId) === normalizeCardName(newItem.cardId) &&
+            existing.rarity === newItem.rarity // レアリティも一致しないと「別のカード」として扱えない（例えばURとSEは別物）
+        );
+
+        if (match) {
+          conflictList.push({
+            tempId: newItem._tempId,
+            newItem,
+            existingItem: match,
+            resolution: 'merge' // デフォルトは在庫追加
+          });
+        } else {
+          safeList.push(newItem);
+        }
+      }
+
+      setConflicts(conflictList);
+      setSafeItems(safeList);
+
+      if (conflictList.length > 0) {
+        setIsConflictModalOpen(true);
+        setImportStatus('idle'); // モーダル待ち状態へ
+      } else {
+        // 競合なしなら即実行
+        executeImport(safeList, []);
+      }
+
+    } catch (e: any) {
+       addToast('error', 'チェック失敗', e.message);
+       setImportStatus('idle');
+    }
+  };
+
+  const executeImport = async (safes: ScrapedItem[], resolvedConflicts: ConflictItem[]) => {
+    setImportStatus('importing');
     try {
       let categoryName = "";
 
@@ -159,27 +218,61 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
 
       if (!categoryName) throw new Error("カテゴリの決定に失敗しました");
 
-      let successCount = 0;
-      for (const item of scrapedItems) {
-        // 保存時も念のためAPI側で正規化されるが、ここでも整えておく
-        const itemToSave = {
+      let count = 0;
+
+      // 1. 安全なアイテムの新規登録
+      for (const item of safes) {
+        await api.addItem({
             name: normalizeCardName(item.name),
             cardId: normalizeCardName(item.cardId),
             rarity: item.rarity,
             stock: item.stock,
             category: categoryName
-        };
-        await api.addItem(itemToSave);
-        successCount++;
+        });
+        count++;
+      }
+
+      // 2. 競合アイテムの処理
+      for (const conf of resolvedConflicts) {
+        if (conf.resolution === 'skip') continue;
+
+        if (conf.resolution === 'merge') {
+          // 在庫加算
+          if (conf.newItem.stock > 0) {
+             await api.updateStock(conf.existingItem.id, conf.newItem.stock);
+             count++;
+          }
+        } else if (conf.resolution === 'overwrite') {
+          // 上書き (名前やカテゴリ情報の更新)
+          await api.updateItem(conf.existingItem.id, {
+            name: normalizeCardName(conf.newItem.name),
+            stock: conf.newItem.stock, // 在庫もWikiの値で上書き
+            category: categoryName // カテゴリも選択中のパックに更新
+          });
+          count++;
+        }
       }
       
-      addToast('success', 'インポート完了', `${successCount}件のデータを在庫に追加しました。`);
+      addToast('success', 'インポート完了', `${count}件のデータを処理しました。`);
       setImportStatus('done');
+      setIsConflictModalOpen(false);
 
     } catch (e: any) {
       addToast('error', 'インポート失敗', `処理中にエラーが発生しました: ${e.message}`);
       setImportStatus('idle');
     }
+  };
+
+  const handleConflictResolutionChange = (tempId: string, resolution: ResolutionType) => {
+    setConflicts(prev => prev.map(c => c.tempId === tempId ? { ...c, resolution } : c));
+  };
+
+  const applyResolutionToAll = (resolution: ResolutionType) => {
+    setConflicts(prev => prev.map(c => ({ ...c, resolution })));
+  };
+
+  const confirmConflicts = () => {
+    executeImport(safeItems, conflicts);
   };
 
   // IDベースでの更新（indexベースより確実）
@@ -340,7 +433,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
 
               <div className="flex items-end">
                  <button 
-                   onClick={handleImport}
+                   onClick={prepareImport}
                    disabled={importStatus !== 'idle'}
                    className={`
                      w-full md:w-auto flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-bold text-white transition-all shadow-md
@@ -350,7 +443,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
                  >
                    {importStatus === 'importing' ? <Loader2 className="animate-spin" size={20} /> : 
                     importStatus === 'done' ? <Check size={20} /> : <Save size={20} />}
-                   {importStatus === 'importing' ? '保存中...' : 
+                   {importStatus === 'importing' ? 'チェック中...' : 
                     importStatus === 'done' ? '保存完了' : '確定して在庫登録'}
                  </button>
               </div>
@@ -450,6 +543,95 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
               >
                 <Plus size={16} /> 空の行を追加
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 競合解決モーダル */}
+      {isConflictModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div className="p-6 border-b border-slate-200 flex justify-between items-center bg-slate-50 rounded-t-xl">
+              <div className="flex items-center gap-3">
+                 <div className="bg-amber-100 p-2 rounded-full text-amber-600">
+                    <AlertTriangle size={24} />
+                 </div>
+                 <div>
+                   <h3 className="text-xl font-bold text-slate-800">重複データが見つかりました</h3>
+                   <p className="text-sm text-slate-500">データベースに既に存在するカードが {conflicts.length} 件あります。</p>
+                 </div>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
+               <div className="flex justify-end gap-2 mb-4">
+                  <span className="text-xs font-bold text-slate-500 self-center mr-2">一括設定:</span>
+                  <button onClick={() => applyResolutionToAll('merge')} className="text-xs px-3 py-1 bg-green-100 text-green-700 rounded-full font-bold hover:bg-green-200">在庫を追加 (すべて)</button>
+                  <button onClick={() => applyResolutionToAll('overwrite')} className="text-xs px-3 py-1 bg-blue-100 text-blue-700 rounded-full font-bold hover:bg-blue-200">上書き (すべて)</button>
+                  <button onClick={() => applyResolutionToAll('skip')} className="text-xs px-3 py-1 bg-slate-200 text-slate-600 rounded-full font-bold hover:bg-slate-300">スキップ (すべて)</button>
+               </div>
+
+               <div className="space-y-3">
+                 {conflicts.map((conf, idx) => (
+                   <div key={conf.tempId} className="bg-white p-4 rounded-lg shadow-sm border border-slate-200 flex flex-col md:flex-row items-center gap-4">
+                      <div className="flex-1 min-w-0">
+                         <div className="flex items-center gap-2 mb-1">
+                            <span className="font-bold text-slate-800">{conf.newItem.name}</span>
+                            <span className="text-xs font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-500">{conf.newItem.cardId}</span>
+                            <span className="text-xs font-bold border px-1.5 py-0.5 rounded bg-slate-50 text-slate-600">{conf.newItem.rarity}</span>
+                         </div>
+                         <div className="text-xs text-slate-500 flex items-center gap-4">
+                            <span>現在庫: <b>{conf.existingItem.stock}</b></span>
+                            <ArrowRight size={12} />
+                            <span>Wiki在庫: <b>{conf.newItem.stock}</b></span>
+                         </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                         <label className={`
+                           cursor-pointer px-3 py-1.5 rounded-md text-sm font-bold transition-colors flex items-center gap-1
+                           ${conf.resolution === 'merge' ? 'bg-green-600 text-white shadow-sm' : 'text-slate-500 hover:bg-white'}
+                         `}>
+                           <input type="radio" name={`res-${idx}`} className="hidden" checked={conf.resolution === 'merge'} onChange={() => handleConflictResolutionChange(conf.tempId, 'merge')} />
+                           <span>在庫追加</span>
+                         </label>
+
+                         <label className={`
+                           cursor-pointer px-3 py-1.5 rounded-md text-sm font-bold transition-colors flex items-center gap-1
+                           ${conf.resolution === 'overwrite' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:bg-white'}
+                         `}>
+                           <input type="radio" name={`res-${idx}`} className="hidden" checked={conf.resolution === 'overwrite'} onChange={() => handleConflictResolutionChange(conf.tempId, 'overwrite')} />
+                           <span>上書き</span>
+                         </label>
+
+                         <label className={`
+                           cursor-pointer px-3 py-1.5 rounded-md text-sm font-bold transition-colors flex items-center gap-1
+                           ${conf.resolution === 'skip' ? 'bg-slate-600 text-white shadow-sm' : 'text-slate-500 hover:bg-white'}
+                         `}>
+                           <input type="radio" name={`res-${idx}`} className="hidden" checked={conf.resolution === 'skip'} onChange={() => handleConflictResolutionChange(conf.tempId, 'skip')} />
+                           <span>スキップ</span>
+                         </label>
+                      </div>
+                   </div>
+                 ))}
+               </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-200 bg-white rounded-b-xl flex justify-end gap-3">
+               <button 
+                 onClick={() => setIsConflictModalOpen(false)}
+                 className="px-5 py-2.5 text-slate-600 font-bold hover:bg-slate-100 rounded-lg transition-colors"
+               >
+                 キャンセル
+               </button>
+               <button 
+                 onClick={confirmConflicts}
+                 className="px-6 py-2.5 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-lg shadow-md flex items-center gap-2"
+               >
+                 <Check size={18} />
+                 解決してインポートを実行
+               </button>
             </div>
           </div>
         </div>
