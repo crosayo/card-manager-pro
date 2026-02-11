@@ -7,6 +7,7 @@ import { api } from '../services/api';
 import { AppError, Season, ToastType } from '../types';
 import { useAppContext } from '../context/AppContext';
 import { INITIAL_RARITIES, INITIAL_SEASONS } from '../constants';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 
 interface SettingsViewProps {
   isAdmin: boolean;
@@ -165,6 +166,73 @@ begin
   return row_to_json(updated_row);
 end;
 $$;
+
+-- 10. RPC関数 (発売日順ソート + サーバー側ページネーション)
+CREATE OR REPLACE FUNCTION public.fetch_items_by_release_date(
+  p_page integer DEFAULT 1,
+  p_page_size integer DEFAULT 50,
+  p_category text DEFAULT NULL,
+  p_search text DEFAULT NULL,
+  p_search_normalized text DEFAULT NULL,
+  p_show_zero_stock boolean DEFAULT true,
+  p_sort_asc boolean DEFAULT false
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_offset integer;
+  v_total integer;
+  v_items json;
+BEGIN
+  v_offset := (p_page - 1) * p_page_size;
+
+  SELECT count(*) INTO v_total
+  FROM public.items i
+  LEFT JOIN public.products p ON i.category = p.name
+  WHERE (p_category IS NULL OR i.category = p_category)
+    AND (p_search IS NULL OR
+         i.name ILIKE '%' || p_search || '%' OR
+         i.card_id ILIKE '%' || p_search || '%' OR
+         i.category ILIKE '%' || p_search || '%' OR
+         (p_search_normalized IS NOT NULL AND (
+           i.name ILIKE '%' || p_search_normalized || '%' OR
+           i.card_id ILIKE '%' || p_search_normalized || '%' OR
+           i.category ILIKE '%' || p_search_normalized || '%'
+         )))
+    AND (p_show_zero_stock OR i.stock > 0);
+
+  SELECT json_agg(t) INTO v_items
+  FROM (
+    SELECT i.id, i.name, i.card_id, i.rarity, i.stock, i.category, i.updated_at
+    FROM public.items i
+    LEFT JOIN public.products p ON i.category = p.name
+    WHERE (p_category IS NULL OR i.category = p_category)
+      AND (p_search IS NULL OR
+           i.name ILIKE '%' || p_search || '%' OR
+           i.card_id ILIKE '%' || p_search || '%' OR
+           i.category ILIKE '%' || p_search || '%' OR
+           (p_search_normalized IS NOT NULL AND (
+             i.name ILIKE '%' || p_search_normalized || '%' OR
+             i.card_id ILIKE '%' || p_search_normalized || '%' OR
+             i.category ILIKE '%' || p_search_normalized || '%'
+           )))
+      AND (p_show_zero_stock OR i.stock > 0)
+    ORDER BY
+      CASE WHEN p_sort_asc THEN COALESCE(p.release_date, '1999-01-01') END ASC,
+      CASE WHEN NOT p_sort_asc THEN COALESCE(p.release_date, '1999-01-01') END DESC,
+      i.card_id ASC,
+      i.rarity ASC
+    LIMIT p_page_size OFFSET v_offset
+  ) t;
+
+  RETURN json_build_object(
+    'data', COALESCE(v_items, '[]'::json),
+    'count', v_total
+  );
+END;
+$$;
 `;
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ 
@@ -194,6 +262,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // Normalization state
   const [isNormalizing, setIsNormalizing] = useState(false);
   const [normalizationCount, setNormalizationCount] = useState(0);
+
+  // Confirm Dialog State
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean; title: string; message: string; variant: 'danger' | 'warning' | 'info';
+    requiredInput?: string; confirmLabel?: string; onConfirm: () => void;
+  }>({ isOpen: false, title: '', message: '', variant: 'warning', onConfirm: () => {} });
 
   // Sync state with context
   useEffect(() => {
@@ -362,11 +436,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!window.confirm(`「${file.name}」を復元しますか？\n既存のデータのうち、IDや製品名が一致するものは上書きされます。`)) {
-      e.target.value = '';
-      return;
-    }
+    const inputEl = e.target;
+    setConfirmDialog({
+      isOpen: true,
+      title: 'バックアップ復元',
+      message: `「${file.name}」を復元しますか？\n既存のデータのうち、IDや製品名が一致するものは上書きされます。`,
+      variant: 'warning',
+      confirmLabel: '復元',
+      onConfirm: () => {
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        processRestore(file, inputEl);
+      }
+    });
+  };
 
+  const processRestore = async (file: File, inputEl: HTMLInputElement) => {
     setIsRestoring(true);
     const reader = new FileReader();
     reader.onload = async (event) => {
@@ -391,10 +475,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     reader.readAsText(file);
   };
 
-  const handleNormalization = async () => {
-    if (!window.confirm("全データの表記揺れ修正と記号(《》)削除を実行しますか？\n\n・全角英数 → 半角英数\n・半角カナ → 全角カナ\n・《》の削除\n\nこの処理はデータベース内の全アイテムを更新するため時間がかかる場合があります。")) {
-      return;
-    }
+  const handleNormalization = () => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'データ正規化',
+      message: '全データの表記揺れ修正と記号(《》)削除を実行しますか？\n\n・全角英数 → 半角英数\n・半角カナ → 全角カナ\n・《》の削除\n\nこの処理はデータベース内の全アイテムを更新するため時間がかかる場合があります。',
+      variant: 'warning',
+      confirmLabel: '実行',
+      onConfirm: () => {
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        executeNormalization();
+      }
+    });
+  };
+
+  const executeNormalization = async () => {
     setIsNormalizing(true);
     setNormalizationCount(0);
     try {
@@ -408,20 +503,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  const handleResetData = async () => {
-    if (!window.confirm("【警告】本当にすべてのデータを削除しますか？\n\nこの操作は元に戻せません。")) {
-      return;
-    }
-    setIsResetting(true);
-    try {
-      await api.resetDatabase();
-      await refreshProducts();
-      addToast('success', 'データ削除完了', 'データベースを初期化しました。');
-    } catch (e: any) {
-      addToast('error', '削除失敗', e.message);
-    } finally {
-      setIsResetting(false);
-    }
+  const handleResetData = () => {
+    setConfirmDialog({
+      isOpen: true,
+      title: '全データ削除',
+      message: '【警告】本当にすべてのデータを削除しますか？\n\nこの操作は元に戻せません。\nすべてのカード・製品・お知らせが完全に削除されます。',
+      variant: 'danger',
+      requiredInput: 'リセット',
+      confirmLabel: '完全に削除する',
+      onConfirm: async () => {
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        setIsResetting(true);
+        try {
+          await api.resetDatabase();
+          await refreshProducts();
+          addToast('success', 'データ削除完了', 'データベースを初期化しました。');
+        } catch (e: any) {
+          addToast('error', '削除失敗', e.message);
+        } finally {
+          setIsResetting(false);
+        }
+      }
+    });
   };
 
   return (
@@ -722,6 +825,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        variant={confirmDialog.variant}
+        requiredInput={confirmDialog.requiredInput}
+        confirmLabel={confirmDialog.confirmLabel}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 };

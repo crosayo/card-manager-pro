@@ -6,6 +6,7 @@ import { Eye, EyeOff, Search, Plus, Loader2, Filter, ArrowUpDown, Edit3, Trash2,
 import { Item, News, Product, SortConfig, AppError, ToastType } from '@/types';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/services/api';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 interface InventoryListProps {
   isAdmin: boolean;
@@ -68,6 +69,12 @@ export const InventoryList: React.FC<InventoryListProps> = ({
   // CSV Import State
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isImporting, setIsImporting] = useState(false);
+
+  // Confirm Dialog State
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean; title: string; message: string; variant: 'danger' | 'warning' | 'info';
+    onConfirm: () => void;
+  }>({ isOpen: false, title: '', message: '', variant: 'warning', onConfirm: () => {} });
 
   const [formData, setFormData] = useState({
     name: '',
@@ -150,11 +157,20 @@ export const InventoryList: React.FC<InventoryListProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!window.confirm(`「${file.name}」を読み込んで在庫を更新しますか？\nCSVの「ID」列と「在庫数」列を使用してデータベースを上書きします。`)) {
-      e.target.value = ''; // Reset
-      return;
-    }
+    const inputEl = e.target;
+    setConfirmDialog({
+      isOpen: true,
+      title: 'CSV在庫更新',
+      message: `「${file.name}」を読み込んで在庫を更新しますか？\nCSVの「ID」列と「在庫数」列を使用してデータベースを上書きします。`,
+      variant: 'warning',
+      onConfirm: () => {
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        processCSVImport(file, inputEl);
+      }
+    });
+  };
 
+  const processCSVImport = async (file: File, inputEl: HTMLInputElement) => {
     setIsImporting(true);
     addToast('info', '在庫更新開始', 'CSVを解析して更新処理を実行しています...');
 
@@ -226,14 +242,21 @@ export const InventoryList: React.FC<InventoryListProps> = ({
     setIsModalOpen(false);
   };
 
-  const handleDeleteClick = async (id: number, name: string, e?: React.MouseEvent) => {
+  const handleDeleteClick = (id: number, name: string, e?: React.MouseEvent) => {
     if (e) {
       e.stopPropagation();
       e.preventDefault();
     }
-    if (window.confirm(`「${name}」を削除してもよろしいですか？\nこの操作は取り消せません。`)) {
-      await onDeleteItem(id);
-    }
+    setConfirmDialog({
+      isOpen: true,
+      title: 'カード削除',
+      message: `「${name}」を削除してもよろしいですか？\nこの操作は取り消せません。`,
+      variant: 'danger',
+      onConfirm: () => {
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        onDeleteItem(id);
+      }
+    });
   };
 
   const openImageSearch = (name: string, e: React.MouseEvent) => {
@@ -806,6 +829,15 @@ export const InventoryList: React.FC<InventoryListProps> = ({
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        variant={confirmDialog.variant}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 };

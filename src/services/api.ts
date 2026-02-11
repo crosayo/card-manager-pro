@@ -139,94 +139,37 @@ export const api = {
   ): Promise<PaginatedItems> => {
     ensureConnection();
 
-    // ★SQL改変不可・itemsテーブルにrelease_dateが無い前提での「発売日順ソート」実装
-    // クライアントサイドで全件取得・結合・ソートを行う（処理は遅くなるが要件を満たす）
+    // 発売日順ソート: RPC関数でサーバー側JOIN+ソート+ページネーション
     if (sort?.key === 'releaseDate') {
       try {
-        // 1. 全製品取得 (発売日データ用)
-        const products = await api.fetchProducts();
-        const productMap = new Map(products.map(p => [p.name, p.releaseDate]));
-        
-        // 2. レアリティ設定取得 (ソート用: ユーザー定義順)
-        const rarities = await api.fetchRarities();
-        const rarityMap = new Map(rarities.map((r, i) => [r, i]));
+        const raw = filters?.search || null;
+        const normalized = raw ? getSearchTerm(raw) : null;
 
-        // 3. 全アイテム取得 (フィルタリングなしで全件)
-        const allItems = await api.fetchAllItemsInternal();
-
-        // 4. データ結合 & アプリケーション側でのフィルタリング
-        // 内部計算用に一時的に releaseDate を持つオブジェクトを作成
-        let itemsWithDate = allItems.map(item => ({
-          ...item,
-          releaseDate: productMap.get(item.category) || '1999-01-01'
-        }));
-
-        // Filter: Category
-        if (filters?.category) {
-          itemsWithDate = itemsWithDate.filter(i => i.category === filters.category);
-        }
-        // Filter: Search
-        if (filters?.search) {
-          const rawSearch = filters.search;
-          const normalizedSearch = getSearchTerm(filters.search);
-          const lowerRaw = rawSearch.toLowerCase();
-          const lowerNormalized = normalizedSearch.toLowerCase();
-
-          // メモリ上での検索なので、normalize同士で比較するのが確実
-          itemsWithDate = itemsWithDate.filter(i => {
-             const normName = normalizeCardName(i.name).toLowerCase();
-             const normCardId = normalizeCardName(i.cardId).toLowerCase();
-             const normCategory = normalizeCardName(i.category).toLowerCase();
-             
-             // 正規化後で一致するか、または生の入力で部分一致するか (パック名も含める)
-             return normName.includes(lowerNormalized) || 
-                    normName.includes(lowerRaw) ||
-                    normCardId.includes(lowerNormalized) ||
-                    normCardId.includes(lowerRaw) ||
-                    normCategory.includes(lowerNormalized) ||
-                    normCategory.includes(lowerRaw);
-          });
-        }
-        // Filter: Zero Stock
-        if (filters?.showZeroStock === false) {
-          itemsWithDate = itemsWithDate.filter(i => i.stock > 0);
-        }
-
-        // 5. ソート実行
-        itemsWithDate.sort((a, b) => {
-          // 第1ソート: 発売日
-          const dateA = new Date(a.releaseDate!).getTime();
-          const dateB = new Date(b.releaseDate!).getTime();
-          
-          if (dateA !== dateB) {
-            return sort.direction === 'asc' ? dateA - dateB : dateB - dateA;
-          }
-          // 第2ソート: 型番
-          if (a.cardId !== b.cardId) {
-            return a.cardId.localeCompare(b.cardId);
-          }
-          // 第3ソート: レアリティ (設定された優先順位に従う)
-          const rankA = rarityMap.has(a.rarity) ? rarityMap.get(a.rarity)! : 999;
-          const rankB = rarityMap.has(b.rarity) ? rarityMap.get(b.rarity)! : 999;
-          
-          return rankA - rankB; // 小さいインデックス(上にあるもの)ほど優先
+        const { data, error } = await supabase.rpc('fetch_items_by_release_date', {
+          p_page: page,
+          p_page_size: pageSize,
+          p_category: filters?.category || null,
+          p_search: raw,
+          p_search_normalized: normalized !== raw ? normalized : null,
+          p_show_zero_stock: filters?.showZeroStock ?? true,
+          p_sort_asc: sort.direction === 'asc'
         });
 
-        // 6. ページネーション切り出し & Item型への準拠（releaseDate削除）
-        const from = (page - 1) * pageSize;
-        const slicedData = itemsWithDate.slice(from, from + pageSize).map(i => {
-          const { releaseDate, ...itemWithoutDate } = i; // releaseDateを除去
-          return itemWithoutDate;
-        });
+        if (error) throw error;
 
         return {
-          data: slicedData,
-          count: itemsWithDate.length
+          data: (data.data || []).map(mapDbItemToAppItem),
+          count: data.count || 0
         };
-
-      } catch (e) {
-        console.error("Client-side sort failed", e);
-        // 失敗時は通常取得にフォールバック
+      } catch (e: any) {
+        // RPC未登録時はクライアント側フォールバック
+        if (e.code === '42883' || e.message?.includes('fetch_items_by_release_date')) {
+          console.warn("RPC 'fetch_items_by_release_date' not found. Falling back to client-side sort. 設定画面のSQLを再実行してください。");
+          return api._fallbackReleaseDateSort(page, pageSize, filters, sort);
+        }
+        console.error("RPC fetch_items_by_release_date failed", e);
+        // その他のエラーもフォールバック
+        return api._fallbackReleaseDateSort(page, pageSize, filters, sort);
       }
     }
     
@@ -269,7 +212,7 @@ export const api = {
       if (sort.key === 'updatedAt') dbKey = 'updated_at';
       
       // releaseDateがここに来た場合（フォールバック）、updated_atで代用
-      if (sort.key === 'releaseDate') dbKey = 'updated_at';
+      if ((sort.key as string) === 'releaseDate') dbKey = 'updated_at';
       
       query = query.order(dbKey, { ascending: sort.direction === 'asc' });
 
@@ -697,5 +640,59 @@ export const api = {
     if (!isSupabaseEnabled || !supabase) return false;
     const { error } = await supabase.from('products').select('name').limit(1);
     return !error || error.code !== '42P01';
+  },
+
+  // フォールバック: RPC未登録時のクライアント側 releaseDate ソート（旧実装）
+  _fallbackReleaseDateSort: async (
+    page: number,
+    pageSize: number,
+    filters?: { category?: string | null, search?: string, showZeroStock?: boolean },
+    sort?: SortConfig
+  ): Promise<PaginatedItems> => {
+    const products = await api.fetchProducts();
+    const productMap = new Map(products.map(p => [p.name, p.releaseDate]));
+    const rarities = await api.fetchRarities();
+    const rarityMap = new Map(rarities.map((r, i) => [r, i]));
+    const allItems = await api.fetchAllItemsInternal();
+
+    let itemsWithDate = allItems.map(item => ({
+      ...item,
+      releaseDate: productMap.get(item.category) || '1999-01-01'
+    }));
+
+    if (filters?.category) {
+      itemsWithDate = itemsWithDate.filter(i => i.category === filters.category);
+    }
+    if (filters?.search) {
+      const lowerRaw = filters.search.toLowerCase();
+      const lowerNormalized = getSearchTerm(filters.search).toLowerCase();
+      itemsWithDate = itemsWithDate.filter(i => {
+        const normName = normalizeCardName(i.name).toLowerCase();
+        const normCardId = normalizeCardName(i.cardId).toLowerCase();
+        const normCategory = normalizeCardName(i.category).toLowerCase();
+        return normName.includes(lowerNormalized) || normName.includes(lowerRaw) ||
+               normCardId.includes(lowerNormalized) || normCardId.includes(lowerRaw) ||
+               normCategory.includes(lowerNormalized) || normCategory.includes(lowerRaw);
+      });
+    }
+    if (filters?.showZeroStock === false) {
+      itemsWithDate = itemsWithDate.filter(i => i.stock > 0);
+    }
+
+    const direction = sort?.direction || 'desc';
+    itemsWithDate.sort((a, b) => {
+      const dateA = new Date(a.releaseDate).getTime();
+      const dateB = new Date(b.releaseDate).getTime();
+      if (dateA !== dateB) return direction === 'asc' ? dateA - dateB : dateB - dateA;
+      if (a.cardId !== b.cardId) return a.cardId.localeCompare(b.cardId);
+      const rankA = rarityMap.get(a.rarity) ?? 999;
+      const rankB = rarityMap.get(b.rarity) ?? 999;
+      return rankA - rankB;
+    });
+
+    const from = (page - 1) * pageSize;
+    const slicedData = itemsWithDate.slice(from, from + pageSize).map(({ releaseDate, ...item }) => item);
+
+    return { data: slicedData, count: itemsWithDate.length };
   }
 };

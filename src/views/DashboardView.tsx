@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { LayoutDashboard, Layers, Package, AlertCircle, Info, Plus, X, Trash2, Calendar, Search, Megaphone, Bell, ArrowRight, Download, Database } from 'lucide-react';
 import { StatsWidget } from '../components/ui/StatsWidget';
 import { useAppContext } from '@/context/AppContext';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 interface DashboardViewProps {
   stats: {
@@ -24,6 +25,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ stats }) => {
   const [newsContent, setNewsContent] = useState('');
   const [newsType, setNewsType] = useState<'info' | 'alert' | 'success'>('info');
   const [newsDuration, setNewsDuration] = useState('1w');
+  const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
 
   const handleAddNews = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,10 +52,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ stats }) => {
     setNewsType('info');
   };
 
-  const handleDeleteNews = async (id: number) => {
-    if (window.confirm('このお知らせを削除しますか？')) {
-      await deleteNews(id);
-    }
+  const handleDeleteNews = (id: number) => {
+    setDeleteTarget(id);
   };
 
   return (
@@ -304,6 +304,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ stats }) => {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={deleteTarget !== null}
+        title="お知らせ削除"
+        message="このお知らせを削除しますか？"
+        variant="warning"
+        confirmLabel="削除"
+        onConfirm={() => {
+          if (deleteTarget !== null) deleteNews(deleteTarget);
+          setDeleteTarget(null);
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 };

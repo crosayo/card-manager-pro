@@ -20,7 +20,7 @@ function InventoryPageContent() {
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 50;
   
-  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'id', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'releaseDate', direction: 'desc' });
   const [showZeroStock, setShowZeroStock] = useState(true);
   
   const categoryParam = searchParams.get('category');

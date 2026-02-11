@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Product } from '../types';
 import { Menu, Plus, Edit3, Trash2, X, Save, Eye, EyeOff } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 
 interface ProductsViewProps {
   products: Product[];
@@ -13,6 +14,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ products }) => {
   const { addProduct, updateProduct, deleteProduct, isAdmin } = useAppContext();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -50,10 +52,8 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ products }) => {
     setIsModalOpen(false);
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (window.confirm(`「${name}」を削除してもよろしいですか？\n紐づいているカードのカテゴリ情報は残りますが、サイドバー等から消えます。`)) {
-      await deleteProduct(id);
-    }
+  const handleDelete = (id: string, name: string) => {
+    setDeleteTarget({ id, name });
   };
 
   const sortedProducts = [...products].sort((a, b) => 
@@ -202,6 +202,19 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ products }) => {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={deleteTarget !== null}
+        title="製品削除"
+        message={deleteTarget ? `「${deleteTarget.name}」を削除してもよろしいですか？\n紐づいているカードのカテゴリ情報は残りますが、サイドバー等から消えます。` : ''}
+        variant="danger"
+        confirmLabel="削除"
+        onConfirm={() => {
+          if (deleteTarget) deleteProduct(deleteTarget.id);
+          setDeleteTarget(null);
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 };
