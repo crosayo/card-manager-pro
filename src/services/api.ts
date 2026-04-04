@@ -202,43 +202,9 @@ export const api = {
   ): Promise<PaginatedItems> => {
     ensureConnection();
 
-    // 発売日順ソート: RPC関数でサーバー側JOIN+ソート+ページネーション
+    // 発売日順ソート: 発売日→型番→レアリティ表示順の3段ソート
     if (sort?.key === 'releaseDate') {
-      // レアリティフィルターがある場合はRPCがサポートしないためフォールバック
-      if (filters?.rarities && filters.rarities.length > 0) {
-        return api._fallbackReleaseDateSort(page, pageSize, filters, sort);
-      }
-
-      try {
-        const raw = filters?.search || null;
-        const normalized = raw ? getSearchTerm(raw) : null;
-
-        const { data, error } = await supabase.rpc('fetch_items_by_release_date', {
-          p_page: page,
-          p_page_size: pageSize,
-          p_category: filters?.category || null,
-          p_search: normalized ?? raw,
-          p_search_normalized: normalized !== raw ? normalized : null,
-          p_show_zero_stock: filters?.showZeroStock ?? true,
-          p_sort_asc: sort.direction === 'asc'
-        });
-
-        if (error) throw error;
-
-        return {
-          data: (data.data || []).map(mapDbItemToAppItem),
-          count: data.count || 0
-        };
-      } catch (e: any) {
-        // RPC未登録時はクライアント側フォールバック
-        if (e.code === '42883' || e.message?.includes('fetch_items_by_release_date')) {
-          console.warn("RPC 'fetch_items_by_release_date' not found. Falling back to client-side sort. 設定画面のSQLを再実行してください。");
-          return api._fallbackReleaseDateSort(page, pageSize, filters, sort);
-        }
-        console.error("RPC fetch_items_by_release_date failed", e);
-        // その他のエラーもフォールバック
-        return api._fallbackReleaseDateSort(page, pageSize, filters, sort);
-      }
+      return api._fallbackReleaseDateSort(page, pageSize, filters, sort);
     }
     
     // --- 通常のServer-side Query (高速) ---

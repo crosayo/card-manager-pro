@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Download, Zap, RefreshCw, Check, Loader2, Save, Trash2, Copy, Plus, Database, ArrowRight, Bookmark, AlertTriangle, ArrowRightCircle } from 'lucide-react';
+import { Download, Zap, RefreshCw, Check, Loader2, Save, Trash2, Copy, Plus, Database, ArrowRight, Bookmark, AlertTriangle, ArrowRightCircle, CheckSquare, Square, Layers } from 'lucide-react';
 import { AppError, ToastType, Item } from '../types';
 import { api } from '../services/api';
 import { useAppContext } from '../context/AppContext';
@@ -54,6 +54,11 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
     releaseDate: new Date().toISOString().split('T')[0]
   });
 
+  // 複数選択 + 一括操作
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkChangeRarity, setBulkChangeRarity] = useState('UR');
+  const [bulkAddRarity, setBulkAddRarity] = useState('SE');
+
   // 競合解決モーダルの状態
   const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
   const [conflicts, setConflicts] = useState<ConflictItem[]>([]);
@@ -100,6 +105,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
 
     setIsAnalyzing(true);
     setScrapedItems([]);
+    setSelectedIds(new Set());
     setImportStatus('idle');
 
     try {
@@ -313,14 +319,57 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
   };
 
   const addNewRow = () => {
-    setScrapedItems(prev => [...prev, { 
-      name: '', 
-      cardId: '', 
-      rarity: 'N', 
-      stock: 0, 
+    setScrapedItems(prev => [...prev, {
+      name: '',
+      cardId: '',
+      rarity: 'N',
+      stock: 0,
       category: '',
       _tempId: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)
     }]);
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === scrapedItems.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(scrapedItems.map(i => i._tempId)));
+    }
+  };
+
+  // 選択行のレアリティを変更
+  const applyBulkChangeRarity = () => {
+    setScrapedItems(prev => prev.map(item =>
+      selectedIds.has(item._tempId) ? { ...item, rarity: bulkChangeRarity } : item
+    ));
+    setSelectedIds(new Set());
+  };
+
+  // 選択行を複製してレアリティを追加
+  const applyBulkAddRarity = () => {
+    setScrapedItems(prev => {
+      const result: ScrapedItem[] = [];
+      for (const item of prev) {
+        result.push(item);
+        if (selectedIds.has(item._tempId)) {
+          result.push({
+            ...item,
+            rarity: bulkAddRarity,
+            _tempId: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)
+          });
+        }
+      }
+      return result;
+    });
+    setSelectedIds(new Set());
   };
 
   const sortedProducts = [...products].sort((a, b) => new Date(b.releaseDate).getTime() - new Date(a.releaseDate).getTime());
@@ -478,12 +527,73 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
                 </button>
               </div>
             </div>
-            
+
+            {/* 一括操作バー（選択中のみ表示） */}
+            {selectedIds.size > 0 && (
+              <div className="px-4 py-3 bg-cyan-50 border-b border-cyan-200 flex flex-wrap items-center gap-3">
+                <span className="text-sm font-bold text-cyan-700 flex items-center gap-1.5">
+                  <Layers size={14} />
+                  {selectedIds.size}件選択中
+                </span>
+
+                {/* レアリティ変更 */}
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={bulkChangeRarity}
+                    onChange={e => setBulkChangeRarity(e.target.value)}
+                    className="border border-slate-300 rounded px-2 py-1 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                  >
+                    {rarities.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                  <button
+                    onClick={applyBulkChangeRarity}
+                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded flex items-center gap-1"
+                  >
+                    <Check size={13} /> 変更する
+                  </button>
+                </div>
+
+                <span className="text-slate-300 text-sm">|</span>
+
+                {/* レアリティ追加 */}
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={bulkAddRarity}
+                    onChange={e => setBulkAddRarity(e.target.value)}
+                    className="border border-slate-300 rounded px-2 py-1 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                  >
+                    {rarities.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                  <button
+                    onClick={applyBulkAddRarity}
+                    className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm font-bold rounded flex items-center gap-1"
+                  >
+                    <Plus size={13} /> 追加する
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => setSelectedIds(new Set())}
+                  className="ml-auto text-xs text-slate-400 hover:text-slate-600 underline"
+                >
+                  全解除
+                </button>
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm whitespace-nowrap">
                 <thead className="bg-slate-100 text-slate-500 font-medium border-b border-slate-200">
                   <tr>
-                    <th className="p-3 w-12 text-center">#</th>
+                    <th className="p-3 w-10 text-center">
+                      <button onClick={toggleSelectAll} className="text-slate-400 hover:text-cyan-600 transition-colors">
+                        {selectedIds.size === scrapedItems.length && scrapedItems.length > 0
+                          ? <CheckSquare size={16} className="text-cyan-600" />
+                          : <Square size={16} />
+                        }
+                      </button>
+                    </th>
+                    <th className="p-3 w-10 text-center text-xs">#</th>
                     <th className="p-3 w-32">型番</th>
                     <th className="p-3 min-w-[200px]">カード名</th>
                     <th className="p-3 w-28">レアリティ</th>
@@ -492,67 +602,78 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {scrapedItems.map((item, idx) => (
-                    <tr key={item._tempId} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-3 text-center text-slate-400 font-mono text-xs">{idx + 1}</td>
-                      <td className="p-2">
-                        <input 
-                          type="text" 
-                          value={item.cardId}
-                          onChange={(e) => updateItem(item._tempId, 'cardId', e.target.value)}
-                          className="w-full bg-white border border-slate-200 focus:border-cyan-500 rounded px-2 py-1 outline-none font-mono text-slate-600 transition-all shadow-sm focus:shadow"
-                        />
-                      </td>
-                      <td className="p-2">
-                        <input 
-                          type="text" 
-                          value={item.name}
-                          onChange={(e) => updateItem(item._tempId, 'name', e.target.value)}
-                          className="w-full bg-white border border-slate-200 focus:border-cyan-500 rounded px-2 py-1 outline-none font-bold text-slate-800 transition-all shadow-sm focus:shadow"
-                        />
-                      </td>
-                      <td className="p-2">
-                        <select 
-                          value={item.rarity}
-                          onChange={(e) => updateItem(item._tempId, 'rarity', e.target.value)}
-                          className="w-full bg-white border border-slate-200 focus:border-cyan-500 rounded px-2 py-1 outline-none cursor-pointer shadow-sm"
-                        >
-                          {rarities.map(r => ( // Contextのraritiesを使用
-                            <option key={r} value={r}>{r}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="p-2">
-                         <input 
-                          type="number" 
-                          min="0"
-                          value={item.stock}
-                          onChange={(e) => updateItem(item._tempId, 'stock', parseInt(e.target.value) || 0)}
-                          className="w-full bg-white border border-slate-200 focus:border-cyan-500 rounded px-2 py-1 outline-none text-right font-mono shadow-sm"
-                        />
-                      </td>
-                      <td className="p-2 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          <button 
-                            type="button"
-                            onClick={() => duplicateItem(idx)}
-                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                            title="複製"
-                          >
-                            <Copy size={16} />
+                  {scrapedItems.map((item, idx) => {
+                    const isSelected = selectedIds.has(item._tempId);
+                    return (
+                      <tr
+                        key={item._tempId}
+                        className={`transition-colors ${isSelected ? 'bg-cyan-50' : 'hover:bg-slate-50'}`}
+                      >
+                        <td className="p-3 text-center">
+                          <button onClick={() => toggleSelect(item._tempId)} className="text-slate-400 hover:text-cyan-600 transition-colors">
+                            {isSelected ? <CheckSquare size={16} className="text-cyan-600" /> : <Square size={16} />}
                           </button>
-                          <button 
-                            type="button"
-                            onClick={() => removeItem(item._tempId)}
-                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                            title="削除"
+                        </td>
+                        <td className="p-3 text-center text-slate-400 font-mono text-xs">{idx + 1}</td>
+                        <td className="p-2">
+                          <input
+                            type="text"
+                            value={item.cardId}
+                            onChange={(e) => updateItem(item._tempId, 'cardId', e.target.value)}
+                            className="w-full bg-white border border-slate-200 focus:border-cyan-500 rounded px-2 py-1 outline-none font-mono text-slate-600 transition-all shadow-sm focus:shadow"
+                          />
+                        </td>
+                        <td className="p-2">
+                          <input
+                            type="text"
+                            value={item.name}
+                            onChange={(e) => updateItem(item._tempId, 'name', e.target.value)}
+                            className="w-full bg-white border border-slate-200 focus:border-cyan-500 rounded px-2 py-1 outline-none font-bold text-slate-800 transition-all shadow-sm focus:shadow"
+                          />
+                        </td>
+                        <td className="p-2">
+                          <select
+                            value={item.rarity}
+                            onChange={(e) => updateItem(item._tempId, 'rarity', e.target.value)}
+                            className="w-full bg-white border border-slate-200 focus:border-cyan-500 rounded px-2 py-1 outline-none cursor-pointer shadow-sm"
                           >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            {rarities.map(r => (
+                              <option key={r} value={r}>{r}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="p-2">
+                          <input
+                            type="number"
+                            min="0"
+                            value={item.stock}
+                            onChange={(e) => updateItem(item._tempId, 'stock', parseInt(e.target.value) || 0)}
+                            className="w-full bg-white border border-slate-200 focus:border-cyan-500 rounded px-2 py-1 outline-none text-right font-mono shadow-sm"
+                          />
+                        </td>
+                        <td className="p-2 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => duplicateItem(idx)}
+                              className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                              title="複製"
+                            >
+                              <Copy size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeItem(item._tempId)}
+                              className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                              title="削除"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
