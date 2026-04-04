@@ -2,11 +2,13 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Eye, EyeOff, Search, Plus, Loader2, Filter, ArrowUpDown, Edit3, Trash2, X, Save, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, ExternalLink, Upload, ChevronsLeft, ChevronsRight, Calendar, ChevronDown } from 'lucide-react';
+import { Eye, EyeOff, Search, Plus, Loader2, Filter, ArrowUpDown, Edit3, Trash2, X, Save, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, ExternalLink, Upload, ChevronsLeft, ChevronsRight, Calendar, ChevronDown, ShoppingCart, Check } from 'lucide-react';
 import { Item, News, Product, SortConfig, AppError, ToastType } from '@/types';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/services/api';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { RARITY_STYLES, RARITY_DEFAULT_STYLE } from '@/constants';
+import { useCart } from '@/context/CartContext';
 
 interface InventoryListProps {
   isAdmin: boolean;
@@ -30,8 +32,7 @@ interface InventoryListProps {
   onAddItem: (item: Omit<Item, 'id' | 'updatedAt'>) => Promise<void>;
   onUpdateItem: (id: number, item: Partial<Item>) => Promise<void>;
   onDeleteItem: (id: number) => Promise<void>;
-  showZeroStock: boolean;
-  setShowZeroStock: (val: boolean) => void;
+  pendingQuantities?: Record<number, number>;
 }
 
 export const InventoryList: React.FC<InventoryListProps> = ({
@@ -56,10 +57,10 @@ export const InventoryList: React.FC<InventoryListProps> = ({
   onAddItem,
   onUpdateItem,
   onDeleteItem,
-  showZeroStock,
-  setShowZeroStock
+  pendingQuantities = {},
 }) => {
-  const { rarities } = useAppContext();
+  const { rarities, selectedRarities, setSelectedRarities, showOnlyInStock, setShowOnlyInStock } = useAppContext();
+  const { cartItems, addToCart } = useCart();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   
@@ -81,13 +82,14 @@ export const InventoryList: React.FC<InventoryListProps> = ({
     cardId: '',
     rarity: 'N',
     stock: 0,
-    category: products[0]?.name || '',
+    category: selectedCategory || products[0]?.name || '',
   });
 
   const totalPages = Math.ceil(totalCount / pageSize);
 
-  const getRarityStyle = (rarity: string) => {
-    return 'bg-slate-100 text-slate-600 border-slate-200';
+  const getRarityStyle = (rarity: string): string => {
+    const style = RARITY_STYLES[rarity] ?? RARITY_DEFAULT_STYLE;
+    return `${style.bg} ${style.text} border ${style.border}`;
   };
   
   const getReleaseDate = (categoryName: string) => {
@@ -101,7 +103,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
       cardId: '',
       rarity: rarities[0] || 'N',
       stock: 0,
-      category: products[0]?.name || '',
+      category: selectedCategory || products[0]?.name || '',
     });
     setIsModalOpen(true);
   };
@@ -208,6 +210,10 @@ export const InventoryList: React.FC<InventoryListProps> = ({
         if (updates.length > 0) {
           await api.bulkUpdateStock(updates);
           addToast('success', '在庫更新完了', `${updates.length}件の在庫を更新しました。ページをリロードして反映を確認してください。`);
+          // ログ記録（失敗しても無視）
+          Promise.all(updates.map(u =>
+            api.addStockLog({ itemId: u.id, delta: 0, stockAfter: u.stock, source: 'csv', note: 'CSVインポ���ト' }).catch(() => {})
+          ));
         } else {
           addToast('error', '更新データなし', '有効な更新データが見つかりませんでした。CSVの形式を確認してください。');
         }
@@ -356,7 +362,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
           </div>
         </div>
         
-        {/* 下段: フィルターとソート */}
+        {/* 下段: ソート */}
         <div className="flex flex-col sm:flex-row gap-2 justify-between items-start sm:items-center text-sm border-t border-slate-100 pt-3">
           <div className="flex gap-2 items-center w-full sm:w-auto relative">
              {/* ソートボタン (クリック式) */}
@@ -376,7 +382,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                </span>
                <ChevronDown size={14} className={`transition-transform duration-200 ${isSortOpen ? 'rotate-180' : ''}`} />
              </button>
-                
+
              {/* ドロップダウンメニュー (クリックで開閉) */}
              {isSortOpen && setSortDirectly && (
                <>
@@ -398,33 +404,48 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                  </div>
                </>
              )}
-
-             {/* 在庫0トグル */}
-             <button
-              onClick={() => setShowZeroStock(!showZeroStock)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all duration-300 font-bold ${
-                showZeroStock
-                  ? 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
-                  : 'bg-amber-100 text-amber-700 border-amber-300 shadow-sm ring-2 ring-amber-500/20 animate-in zoom-in-95'
-              }`}
-             >
-               {showZeroStock ? <Eye size={14} /> : <EyeOff size={14} className="animate-pulse" />}
-               <span>{showZeroStock ? '在庫0を表示中' : '在庫0を非表示中'}</span>
-               {!showZeroStock && (
-                 <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full uppercase ml-1">Filtered</span>
-               )}
-             </button>
           </div>
-
-          {selectedCategory && (
-            <div className="flex items-center gap-2 text-slate-600 bg-cyan-50 px-3 py-1.5 rounded-lg border border-cyan-100">
-              <Filter size={14} className="text-cyan-600" />
-              <span className="font-bold text-cyan-800">
-                {products.find(p => p.name === selectedCategory)?.name || selectedCategory}
-              </span>
-            </div>
-          )}
         </div>
+
+        {/* フィルターチップバー: 適用中フィルターを表示 */}
+        {(selectedCategory || selectedRarities.length > 0 || showOnlyInStock) && (
+          <div className="flex flex-wrap gap-2 items-center pt-2 border-t border-slate-100">
+            <Filter size={14} className="text-slate-400 shrink-0" />
+            {selectedCategory && (
+              <span className="flex items-center gap-1 bg-cyan-100 text-cyan-800 border border-cyan-200 px-2 py-1 rounded-full text-xs font-bold">
+                {selectedCategory}
+              </span>
+            )}
+            {selectedRarities.map(r => {
+              const style = RARITY_STYLES[r] ?? RARITY_DEFAULT_STYLE;
+              return (
+                <button
+                  key={r}
+                  onClick={() => setSelectedRarities(selectedRarities.filter(x => x !== r))}
+                  className={`flex items-center gap-1 ${style.bg} ${style.text} border ${style.border} px-2 py-1 rounded-full text-xs font-bold hover:opacity-80 transition-opacity`}
+                >
+                  {r} <X size={10} />
+                </button>
+              );
+            })}
+            {showOnlyInStock && (
+              <button
+                onClick={() => setShowOnlyInStock(false)}
+                className="flex items-center gap-1 bg-amber-100 text-amber-700 border border-amber-300 px-2 py-1 rounded-full text-xs font-bold hover:opacity-80 transition-opacity"
+              >
+                在庫あり <X size={10} />
+              </button>
+            )}
+            {(selectedRarities.length > 0 || showOnlyInStock) && (
+              <button
+                onClick={() => { setSelectedRarities([]); setShowOnlyInStock(false); }}
+                className="text-xs text-slate-400 hover:text-slate-600 underline"
+              >
+                すべて解除
+              </button>
+            )}
+          </div>
+        )}
       </div>
       
       {isLoading && (
@@ -499,7 +520,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                   <td className="p-4">
                     <div className="flex items-center gap-3">
                       {isAdmin && (
-                        <button 
+                        <button
                           type="button"
                           onClick={() => updateStock(item.id, -1)}
                           disabled={isLoading}
@@ -508,13 +529,20 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                           -
                         </button>
                       )}
-                      
-                      <span className={`font-bold text-lg w-8 text-center ${item.stock === 0 ? 'text-red-500 opacity-50' : 'text-slate-700'}`}>
-                        {item.stock}
-                      </span>
-                      
+
+                      <div className="text-center">
+                        <span className={`font-bold text-lg ${item.stock === 0 ? 'text-red-500 opacity-50' : 'text-slate-700'}`}>
+                          {item.stock}
+                        </span>
+                        {(pendingQuantities[item.id] ?? 0) > 0 && (
+                          <div className="text-[10px] text-red-400 whitespace-nowrap">
+                            {pendingQuantities[item.id]}枚リクエスト中
+                          </div>
+                        )}
+                      </div>
+
                       {isAdmin && (
-                        <button 
+                        <button
                           type="button"
                           onClick={() => updateStock(item.id, 1)}
                           disabled={isLoading}
@@ -529,28 +557,52 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                     {products.find(p => p.name === item.category)?.name || item.category}
                   </td>
                   <td className="p-4 text-center">
-                    {isAdmin ? (
-                      <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button 
-                          type="button"
-                          onClick={(e) => openEditModal(item, e)}
-                          className="bg-slate-100 hover:bg-cyan-100 text-slate-400 hover:text-cyan-600 p-2 rounded transition-colors" 
-                          title="編集"
-                        >
-                          <Edit3 size={18} />
-                        </button>
-                        <button 
-                          type="button"
-                          onClick={(e) => handleDeleteClick(item.id, item.name, e)}
-                          className="bg-slate-100 hover:bg-red-100 text-slate-400 hover:text-red-600 p-2 rounded transition-colors" 
-                          title="削除"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="text-xs text-slate-300">-</span>
-                    )}
+                    <div className="flex items-center justify-center gap-2">
+                      {/* リクエストボタン */}
+                      {(() => {
+                        const effectiveStock = item.stock - (pendingQuantities[item.id] ?? 0);
+                        const inCart = cartItems.some(c => c.itemId === item.id);
+                        return (
+                          <button
+                            type="button"
+                            disabled={effectiveStock <= 0}
+                            onClick={() => addToCart({ itemId: item.id, name: item.name, quantity: 1, maxStock: effectiveStock })}
+                            className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-bold transition-colors ${
+                              inCart
+                                ? 'bg-cyan-100 text-cyan-700 border border-cyan-300'
+                                : effectiveStock <= 0
+                                  ? 'bg-slate-50 text-slate-300 border border-slate-200 cursor-not-allowed'
+                                  : 'bg-slate-100 hover:bg-cyan-50 text-slate-500 hover:text-cyan-600 border border-slate-200 hover:border-cyan-300'
+                            }`}
+                            title={effectiveStock <= 0 ? '在庫なし' : 'カートに追加'}
+                          >
+                            {inCart ? <Check size={12} /> : <ShoppingCart size={12} />}
+                            {inCart ? '追加済み' : effectiveStock <= 0 ? '在庫なし' : 'リクエスト'}
+                          </button>
+                        );
+                      })()}
+
+                      {isAdmin && (
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            type="button"
+                            onClick={(e) => openEditModal(item, e)}
+                            className="bg-slate-100 hover:bg-cyan-100 text-slate-400 hover:text-cyan-600 p-2 rounded transition-colors"
+                            title="編集"
+                          >
+                            <Edit3 size={18} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteClick(item.id, item.name, e)}
+                            className="bg-slate-100 hover:bg-red-100 text-slate-400 hover:text-red-600 p-2 rounded transition-colors"
+                            title="削除"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))
@@ -604,17 +656,22 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                 <div className="flex items-center gap-3">
                    {isAdmin ? (
                      <>
-                       <button 
+                       <button
                          onClick={() => updateStock(item.id, -1)}
                          disabled={isLoading}
                          className="w-10 h-10 flex items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-red-100 hover:text-red-600 active:bg-red-200 transition-colors disabled:opacity-50"
                        >
                          -
                        </button>
-                       <span className={`font-bold text-xl w-8 text-center ${item.stock === 0 ? 'text-red-500 opacity-50' : 'text-slate-800'}`}>
-                         {item.stock}
-                       </span>
-                       <button 
+                       <div className="text-center">
+                         <span className={`font-bold text-xl ${item.stock === 0 ? 'text-red-500 opacity-50' : 'text-slate-800'}`}>
+                           {item.stock}
+                         </span>
+                         {(pendingQuantities[item.id] ?? 0) > 0 && (
+                           <div className="text-[10px] text-red-400">{pendingQuantities[item.id]}件申請中</div>
+                         )}
+                       </div>
+                       <button
                          onClick={() => updateStock(item.id, 1)}
                          disabled={isLoading}
                          className="w-10 h-10 flex items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-600 active:bg-blue-200 transition-colors disabled:opacity-50"
@@ -625,13 +682,42 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                    ) : (
                      <div className="flex items-center gap-2">
                         <span className="text-xs text-slate-400">在庫:</span>
-                        <span className={`font-bold text-xl ${item.stock === 0 ? 'text-red-500' : 'text-slate-800'}`}>
-                          {item.stock}
-                        </span>
+                        <div className="text-center">
+                          <span className={`font-bold text-xl ${item.stock === 0 ? 'text-red-500' : 'text-slate-800'}`}>
+                            {item.stock}
+                          </span>
+                          {(pendingQuantities[item.id] ?? 0) > 0 && (
+                            <div className="text-[10px] text-red-400">{pendingQuantities[item.id]}件申請中</div>
+                          )}
+                        </div>
                      </div>
                    )}
                 </div>
               </div>
+
+              {/* モバイル: リクエストボタン */}
+              {(() => {
+                const effectiveStock = item.stock - (pendingQuantities[item.id] ?? 0);
+                const inCart = cartItems.some(c => c.itemId === item.id);
+                return (
+                  <div className="mt-2">
+                    <button
+                      disabled={effectiveStock <= 0}
+                      onClick={() => addToCart({ itemId: item.id, name: item.name, quantity: 1, maxStock: effectiveStock })}
+                      className={`w-full py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 border transition-colors ${
+                        inCart
+                          ? 'bg-cyan-50 text-cyan-700 border-cyan-300'
+                          : effectiveStock <= 0
+                            ? 'bg-slate-50 text-slate-300 border-slate-200 cursor-not-allowed'
+                            : 'bg-slate-50 hover:bg-cyan-50 text-slate-500 hover:text-cyan-600 border-slate-200 hover:border-cyan-300'
+                      }`}
+                    >
+                      {inCart ? <Check size={14} /> : <ShoppingCart size={14} />}
+                      {inCart ? 'カートに追加済み' : effectiveStock <= 0 ? '在庫なし' : 'リクエストする'}
+                    </button>
+                  </div>
+                );
+              })()}
               
                {isAdmin && (
                  <div className="mt-3 flex justify-end gap-2 pt-2 border-t border-slate-50 border-dashed">

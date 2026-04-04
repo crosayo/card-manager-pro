@@ -1,6 +1,6 @@
 
 import { supabase, isSupabaseEnabled } from '../lib/supabase';
-import { Item, Product, PaginatedItems, SortConfig, Season, News, SystemInfo } from '../types';
+import { Item, Product, PaginatedItems, SortConfig, Season, News, SystemInfo, StockLog, CardRequest, RequestItem, RequestEditLog, Supply } from '../types';
 import { INITIAL_RARITIES, INITIAL_SEASONS, INITIAL_SYSTEM_INFO } from '../constants';
 import { normalizeCardName, getSearchTerm } from '../utils';
 
@@ -20,6 +20,53 @@ const mapDbProductToAppProduct = (dbProduct: any): Product => ({
   name: dbProduct.name,
   releaseDate: dbProduct.release_date || '2000-01-01',
   isSidebarVisible: dbProduct.is_sidebar_visible ?? true,
+});
+
+const mapDbSupplyToAppSupply = (db: any): Supply => ({
+  id: db.id,
+  name: db.name,
+  category: db.category,
+  imageUrl: db.image_url,
+  stock: db.stock,
+  releaseDate: db.release_date,
+  createdAt: db.created_at,
+  updatedAt: db.updated_at,
+});
+
+const mapDbStockLogToAppStockLog = (db: any): StockLog => ({
+  id: db.id,
+  itemId: db.item_id,
+  supplyId: db.supply_id,
+  delta: db.delta,
+  stockAfter: db.stock_after,
+  source: db.source,
+  requestId: db.request_id,
+  note: db.note,
+  createdAt: db.created_at,
+});
+
+const mapDbRequestItemToAppRequestItem = (db: any): RequestItem => ({
+  id: db.id,
+  requestId: db.request_id,
+  itemId: db.item_id,
+  supplyId: db.supply_id,
+  quantity: db.quantity,
+  unitPrice: db.unit_price,
+  item: db.items ? mapDbItemToAppItem(db.items) : undefined,
+  supply: db.supplies ? mapDbSupplyToAppSupply(db.supplies) : undefined,
+});
+
+const mapDbRequestToAppRequest = (db: any): CardRequest => ({
+  id: db.id,
+  token: db.token,
+  requesterName: db.requester_name,
+  message: db.message,
+  status: db.status,
+  priceTotal: db.price_total,
+  adminMemo: db.admin_memo,
+  createdAt: db.created_at,
+  resolvedAt: db.resolved_at,
+  items: db.request_items ? db.request_items.map(mapDbRequestItemToAppRequestItem) : undefined,
 });
 
 const mapDbNewsToAppNews = (dbNews: any): News => ({
@@ -130,17 +177,34 @@ export const api = {
     if (error) handleSupabaseError(error, 'deleteProduct');
   },
 
+  // IDで1件取得
+  fetchItemById: async (id: number): Promise<Item> => {
+    ensureConnection();
+    const { data, error } = await supabase
+      .from('items')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error) handleSupabaseError(error, 'fetchItemById');
+    return mapDbItemToAppItem(data);
+  },
+
   // --- Items (Smart Pagination) ---
   fetchItems: async (
-    page: number = 1, 
-    pageSize: number = 50, 
-    filters?: { category?: string | null, search?: string, showZeroStock?: boolean },
+    page: number = 1,
+    pageSize: number = 50,
+    filters?: { category?: string | null, search?: string, showZeroStock?: boolean, rarities?: string[] },
     sort?: SortConfig
   ): Promise<PaginatedItems> => {
     ensureConnection();
 
     // 発売日順ソート: RPC関数でサーバー側JOIN+ソート+ページネーション
     if (sort?.key === 'releaseDate') {
+      // レアリティフィルターがある場合はRPCがサポートしないためフォールバック
+      if (filters?.rarities && filters.rarities.length > 0) {
+        return api._fallbackReleaseDateSort(page, pageSize, filters, sort);
+      }
+
       try {
         const raw = filters?.search || null;
         const normalized = raw ? getSearchTerm(raw) : null;
@@ -149,7 +213,7 @@ export const api = {
           p_page: page,
           p_page_size: pageSize,
           p_category: filters?.category || null,
-          p_search: raw,
+          p_search: normalized ?? raw,
           p_search_normalized: normalized !== raw ? normalized : null,
           p_show_zero_stock: filters?.showZeroStock ?? true,
           p_sort_asc: sort.direction === 'asc'
@@ -181,25 +245,24 @@ export const api = {
       query = query.eq('category', filters.category);
     }
     if (filters?.search) {
-      // 検索寛容化: 正規化された用語と、生の入力の両方で検索する
-      // DB側が正規化されていれば前者がヒット、されていなくても後者がヒットする可能性がある
-      // パック名(category)も検索対象に追加
       const normalized = getSearchTerm(filters.search);
-      const raw = filters.search;
-      
-      const conditions = [
-        `name.ilike.%${raw}%`,
-        `card_id.ilike.%${raw}%`,
-        `category.ilike.%${raw}%` // パック名検索対応
-      ];
+      const conditions: string[] = [];
 
-      if (normalized !== raw) {
-        conditions.push(`name.ilike.%${normalized}%`);
-        conditions.push(`card_id.ilike.%${normalized}%`);
-        conditions.push(`category.ilike.%${normalized}%`); // パック名検索対応
+      // 正規化後のキーワードで検索（常に実行）
+      conditions.push(`name.ilike.%${normalized}%`);
+      conditions.push(`card_id.ilike.%${normalized}%`);
+      conditions.push(`category.ilike.%${normalized}%`);
+
+      // 元のキーワードと異なる場合は元のキーワードでも検索
+      if (normalized !== filters.search.trim()) {
+        conditions.push(`name.ilike.%${filters.search.trim()}%`);
+        conditions.push(`card_id.ilike.%${filters.search.trim()}%`);
       }
-      
+
       query = query.or(conditions.join(','));
+    }
+    if (filters?.rarities && filters.rarities.length > 0) {
+      query = query.in('rarity', filters.rarities);
     }
     if (filters?.showZeroStock === false) {
       query = query.gt('stock', 0);
@@ -636,6 +699,349 @@ export const api = {
     if (error) handleSupabaseError(error, 'deleteNews');
   },
 
+  // --- StockLogs ---
+  addStockLog: async (params: {
+    itemId?: number;
+    supplyId?: number;
+    delta: number;
+    stockAfter: number;
+    source: 'manual' | 'request' | 'csv';
+    requestId?: number;
+    note?: string;
+  }): Promise<void> => {
+    ensureConnection();
+    const { error } = await supabase.from('stock_logs').insert([{
+      item_id: params.itemId ?? null,
+      supply_id: params.supplyId ?? null,
+      delta: params.delta,
+      stock_after: params.stockAfter,
+      source: params.source,
+      request_id: params.requestId ?? null,
+      note: params.note ?? null,
+    }]);
+    if (error) {
+      // テーブル未作成時はエラーを無視してログのみ出力
+      if (error.code === '42P01') { console.warn('stock_logs テーブルが存在しません'); return; }
+      handleSupabaseError(error, 'addStockLog');
+    }
+  },
+
+  fetchStockLogs: async (limit: number = 50): Promise<StockLog[]> => {
+    ensureConnection();
+    const { data, error } = await supabase
+      .from('stock_logs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) {
+      if (error.code === '42P01') return [];
+      handleSupabaseError(error, 'fetchStockLogs');
+    }
+    return (data || []).map(mapDbStockLogToAppStockLog);
+  },
+
+  // --- Requests ---
+  fetchRequests: async (status?: 'pending' | 'completed' | 'cancelled'): Promise<CardRequest[]> => {
+    ensureConnection();
+    let query = supabase
+      .from('requests')
+      .select(`*, request_items(*, items(*), supplies(*))`)
+      .order('created_at', { ascending: false });
+    if (status) query = query.eq('status', status);
+    const { data, error } = await query;
+    if (error) {
+      if (error.code === '42P01') return [];
+      handleSupabaseError(error, 'fetchRequests');
+    }
+    return (data || []).map(mapDbRequestToAppRequest);
+  },
+
+  fetchRequestById: async (id: number): Promise<CardRequest> => {
+    ensureConnection();
+    const { data, error } = await supabase
+      .from('requests')
+      .select(`*, request_items(*, items(*), supplies(*))`)
+      .eq('id', id)
+      .single();
+    if (error) handleSupabaseError(error, 'fetchRequestById');
+    return mapDbRequestToAppRequest(data);
+  },
+
+  createRequest: async (params: {
+    requesterName: string;
+    message?: string;
+    items: Array<{ itemId?: number; supplyId?: number; quantity: number }>;
+  }): Promise<CardRequest> => {
+    ensureConnection();
+    const { data: req, error: reqError } = await supabase
+      .from('requests')
+      .insert([{ requester_name: params.requesterName, message: params.message || null }])
+      .select()
+      .single();
+    if (reqError) handleSupabaseError(reqError, 'createRequest');
+
+    const requestItems = params.items.map(item => ({
+      request_id: req.id,
+      item_id: item.itemId ?? null,
+      supply_id: item.supplyId ?? null,
+      quantity: item.quantity,
+    }));
+    const { error: itemsError } = await supabase.from('request_items').insert(requestItems);
+    if (itemsError) handleSupabaseError(itemsError, 'createRequest(items)');
+
+    return api.fetchRequestById(req.id);
+  },
+
+  updateRequestStatus: async (
+    requestId: number,
+    status: 'completed' | 'cancelled',
+    params?: {
+      unitPrices?: Record<number, number>;
+      priceTotal?: number;
+      adminMemo?: string;
+    }
+  ): Promise<CardRequest> => {
+    ensureConnection();
+    const updates: any = {
+      status,
+      resolved_at: new Date().toISOString(),
+    };
+    if (params?.priceTotal !== undefined) updates.price_total = params.priceTotal;
+    if (params?.adminMemo !== undefined) updates.admin_memo = params.adminMemo;
+
+    const { error } = await supabase.from('requests').update(updates).eq('id', requestId);
+    if (error) handleSupabaseError(error, 'updateRequestStatus');
+
+    // 単価を更新
+    if (params?.unitPrices) {
+      await Promise.all(
+        Object.entries(params.unitPrices).map(([riId, price]) =>
+          supabase.from('request_items').update({ unit_price: price }).eq('id', Number(riId))
+        )
+      );
+    }
+
+    return api.fetchRequestById(requestId);
+  },
+
+  editRequest: async (
+    requestId: number,
+    requesterName: string,
+    params: {
+      message?: string;
+      itemChanges?: Array<{ requestItemId: number; quantity: number }>;
+      itemsToAdd?: Array<{ itemId?: number; supplyId?: number; quantity: number }>;
+    }
+  ): Promise<CardRequest> => {
+    ensureConnection();
+    // 本人確認
+    const { data: reqData, error: reqFetchError } = await supabase
+      .from('requests')
+      .select('requester_name')
+      .eq('id', requestId)
+      .single();
+    if (reqFetchError) handleSupabaseError(reqFetchError, 'editRequest(fetch)');
+    if (reqData.requester_name !== requesterName) {
+      const e: any = new Error('名前が一致しません。送信時に入力した名前を入力してください。');
+      e.code = 'NAME_MISMATCH';
+      throw e;
+    }
+
+    if (params.message !== undefined) {
+      const { error } = await supabase.from('requests').update({ message: params.message }).eq('id', requestId);
+      if (error) handleSupabaseError(error, 'editRequest(message)');
+    }
+    if (params.itemChanges) {
+      await Promise.all(params.itemChanges.map(c =>
+        supabase.from('request_items').update({ quantity: c.quantity }).eq('id', c.requestItemId)
+      ));
+    }
+    if (params.itemsToAdd && params.itemsToAdd.length > 0) {
+      const newItems = params.itemsToAdd.map(i => ({
+        request_id: requestId,
+        item_id: i.itemId ?? null,
+        supply_id: i.supplyId ?? null,
+        quantity: i.quantity,
+      }));
+      const { error } = await supabase.from('request_items').insert(newItems);
+      if (error) handleSupabaseError(error, 'editRequest(addItems)');
+    }
+
+    return api.fetchRequestById(requestId);
+  },
+
+  addRequestEditLog: async (params: {
+    requestId: number;
+    editorName: string;
+    fieldChanged: string;
+    oldValue?: string;
+    newValue?: string;
+  }): Promise<void> => {
+    ensureConnection();
+    const { error } = await supabase.from('request_edit_logs').insert([{
+      request_id: params.requestId,
+      editor_name: params.editorName,
+      field_changed: params.fieldChanged,
+      old_value: params.oldValue ?? null,
+      new_value: params.newValue ?? null,
+    }]);
+    if (error) {
+      if (error.code === '42P01') return;
+      handleSupabaseError(error, 'addRequestEditLog');
+    }
+  },
+
+  fetchRequestEditLogs: async (requestId: number): Promise<RequestEditLog[]> => {
+    ensureConnection();
+    const { data, error } = await supabase
+      .from('request_edit_logs')
+      .select('*')
+      .eq('request_id', requestId)
+      .order('created_at', { ascending: false });
+    if (error) {
+      if (error.code === '42P01') return [];
+      handleSupabaseError(error, 'fetchRequestEditLogs');
+    }
+    return (data || []).map((db: any): RequestEditLog => ({
+      id: db.id,
+      requestId: db.request_id,
+      editorName: db.editor_name,
+      fieldChanged: db.field_changed,
+      oldValue: db.old_value,
+      newValue: db.new_value,
+      createdAt: db.created_at,
+    }));
+  },
+
+  // pending中のリクエスト枚数を集計 (itemId -> 枚数)
+  fetchPendingQuantities: async (): Promise<Record<number, number>> => {
+    ensureConnection();
+    const { data, error } = await supabase
+      .from('request_items')
+      .select('item_id, quantity, requests!inner(status)')
+      .eq('requests.status', 'pending');
+    if (error) {
+      if (error.code === '42P01') return {};
+      console.warn('fetchPendingQuantities failed:', error.message);
+      return {};
+    }
+    const map: Record<number, number> = {};
+    for (const row of (data || [])) {
+      if (row.item_id) {
+        map[row.item_id] = (map[row.item_id] ?? 0) + row.quantity;
+      }
+    }
+    return map;
+  },
+
+  // --- Supplies ---
+  fetchSupplies: async (category?: Supply['category']): Promise<Supply[]> => {
+    ensureConnection();
+    let query = supabase.from('supplies').select('*').order('created_at', { ascending: false });
+    if (category) query = query.eq('category', category);
+    const { data, error } = await query;
+    if (error) {
+      if (error.code === '42P01') return [];
+      handleSupabaseError(error, 'fetchSupplies');
+    }
+    return (data || []).map(mapDbSupplyToAppSupply);
+  },
+
+  createSupply: async (params: { name: string; category: Supply['category']; releaseDate?: string }): Promise<Supply> => {
+    ensureConnection();
+    const { data, error } = await supabase
+      .from('supplies')
+      .insert([{ name: params.name, category: params.category, release_date: params.releaseDate ?? null }])
+      .select()
+      .single();
+    if (error) handleSupabaseError(error, 'createSupply');
+    return mapDbSupplyToAppSupply(data);
+  },
+
+  updateSupply: async (id: number, params: Partial<Pick<Supply, 'name' | 'category' | 'releaseDate' | 'stock'>>): Promise<Supply> => {
+    ensureConnection();
+    const updates: any = {};
+    if (params.name !== undefined) updates.name = params.name;
+    if (params.category !== undefined) updates.category = params.category;
+    if (params.releaseDate !== undefined) updates.release_date = params.releaseDate;
+    if (params.stock !== undefined) updates.stock = params.stock;
+    const { data, error } = await supabase.from('supplies').update(updates).eq('id', id).select().single();
+    if (error) handleSupabaseError(error, 'updateSupply');
+    return mapDbSupplyToAppSupply(data);
+  },
+
+  deleteSupply: async (id: number): Promise<void> => {
+    ensureConnection();
+    const { error } = await supabase.from('supplies').delete().eq('id', id);
+    if (error) handleSupabaseError(error, 'deleteSupply');
+  },
+
+  uploadSupplyImage: async (supplyId: number, file: File): Promise<string> => {
+    ensureConnection();
+    const { compressImage } = await import('@/utils');
+    const compressed = await compressImage(file, { maxWidth: 800, quality: 0.8 });
+    const fileName = `supply-${supplyId}-${Date.now()}.jpg`;
+    const { error } = await supabase.storage
+      .from('supply-images')
+      .upload(fileName, compressed, { upsert: true, contentType: 'image/jpeg' });
+    if (error) handleSupabaseError(error, 'uploadSupplyImage');
+    const { data: urlData } = supabase.storage.from('supply-images').getPublicUrl(fileName);
+    await supabase.from('supplies').update({ image_url: urlData.publicUrl }).eq('id', supplyId);
+    return urlData.publicUrl;
+  },
+
+  updateSupplyStock: async (id: number, delta: number): Promise<Supply> => {
+    ensureConnection();
+    const { data: current, error: fetchError } = await supabase.from('supplies').select('stock').eq('id', id).single();
+    if (fetchError) handleSupabaseError(fetchError, 'updateSupplyStock(fetch)');
+    const newStock = Math.max(0, (current?.stock ?? 0) + delta);
+    const { data, error } = await supabase.from('supplies').update({ stock: newStock }).eq('id', id).select().single();
+    if (error) handleSupabaseError(error, 'updateSupplyStock');
+    return mapDbSupplyToAppSupply(data);
+  },
+
+  // --- Discord 通知 ---
+  fetchDiscordWebhookUrl: async (): Promise<string> => {
+    ensureConnection();
+    const { data, error } = await supabase.from('config').select('value').eq('key', 'discord_webhook_url').single();
+    if (error) return '';
+    const val = data?.value;
+    return typeof val === 'string' ? val : '';
+  },
+
+  updateDiscordWebhookUrl: async (url: string): Promise<void> => {
+    ensureConnection();
+    const { error } = await supabase.from('config').upsert({ key: 'discord_webhook_url', value: url }, { onConflict: 'key' });
+    if (error) handleSupabaseError(error, 'updateDiscordWebhookUrl');
+  },
+
+  sendDiscordNotification: async (request: CardRequest): Promise<void> => {
+    const webhookUrl = await api.fetchDiscordWebhookUrl();
+    if (!webhookUrl) return;
+
+    const itemLines = (request.items || []).map(ri => {
+      const name = ri.item?.name ?? ri.supply?.name ?? '不明';
+      return `${name} × ${ri.quantity}枚`;
+    });
+
+    const lines = [
+      '【新しいリクエスト】',
+      `送信者: ${request.requesterName}`,
+      ...itemLines,
+    ];
+    if (request.message) lines.push(`メモ: ${request.message}`);
+
+    try {
+      await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: lines.join('\n') }),
+      });
+    } catch (e) {
+      console.warn('Discord通知の送信に失敗しました:', e);
+    }
+  },
+
   checkSchema: async (): Promise<boolean> => {
     if (!isSupabaseEnabled || !supabase) return false;
     const { error } = await supabase.from('products').select('name').limit(1);
@@ -646,7 +1052,7 @@ export const api = {
   _fallbackReleaseDateSort: async (
     page: number,
     pageSize: number,
-    filters?: { category?: string | null, search?: string, showZeroStock?: boolean },
+    filters?: { category?: string | null, search?: string, showZeroStock?: boolean, rarities?: string[] },
     sort?: SortConfig
   ): Promise<PaginatedItems> => {
     const products = await api.fetchProducts();
@@ -675,6 +1081,9 @@ export const api = {
                normCategory.includes(lowerNormalized) || normCategory.includes(lowerRaw);
       });
     }
+    if (filters?.rarities && filters.rarities.length > 0) {
+      itemsWithDate = itemsWithDate.filter(i => filters.rarities!.includes(i.rarity));
+    }
     if (filters?.showZeroStock === false) {
       itemsWithDate = itemsWithDate.filter(i => i.stock > 0);
     }
@@ -694,5 +1103,15 @@ export const api = {
     const slicedData = itemsWithDate.slice(from, from + pageSize).map(({ releaseDate, ...item }) => item);
 
     return { data: slicedData, count: itemsWithDate.length };
-  }
+  },
+
+  fetchPendingRequestsCount: async (): Promise<number> => {
+    ensureConnection();
+    const { count, error } = await supabase
+      .from('requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending');
+    if (error) return 0;
+    return count ?? 0;
+  },
 };

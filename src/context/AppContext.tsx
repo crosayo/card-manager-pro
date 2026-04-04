@@ -16,7 +16,11 @@ interface AppContextType {
   products: Product[];
   rarities: string[];
   seasons: Season[];
-  systemInfo: SystemInfo; 
+  systemInfo: SystemInfo;
+  selectedRarities: string[];
+  setSelectedRarities: (rarities: string[]) => void;
+  showOnlyInStock: boolean;
+  setShowOnlyInStock: (val: boolean) => void;
   refreshProducts: () => Promise<void>;
   refreshRarities: () => Promise<void>;
   refreshSeasons: () => Promise<void>;
@@ -49,6 +53,8 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [rarities, setRarities] = useState<string[]>(INITIAL_RARITIES);
   const [seasons, setSeasons] = useState<Season[]>(INITIAL_SEASONS);
   const [systemInfo, setSystemInfo] = useState<SystemInfo>(INITIAL_SYSTEM_INFO);
+  const [selectedRarities, setSelectedRarities] = useState<string[]>([]);
+  const [showOnlyInStock, setShowOnlyInStock] = useState(false);
 
   const addToast = useCallback((type: ToastType['type'], title: string, message?: string, errorDetail?: AppError) => {
     const id = Date.now();
@@ -218,6 +224,10 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       rarities,
       seasons,
       systemInfo,
+      selectedRarities,
+      setSelectedRarities,
+      showOnlyInStock,
+      setShowOnlyInStock,
       refreshProducts,
       refreshRarities,
       refreshSeasons,

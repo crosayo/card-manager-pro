@@ -10,7 +10,8 @@ export default function DashboardPage() {
   const [stats, setStats] = useState({
     totalCards: 0,
     totalStock: 0,
-    lowStock: 0
+    lowStock: 0,
+    pendingRequests: 0,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -18,8 +19,11 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const data = await api.fetchDashboardStats();
-        setStats(data);
+        const [data, pendingRequests] = await Promise.all([
+          api.fetchDashboardStats(),
+          api.fetchPendingRequestsCount(),
+        ]);
+        setStats({ ...data, pendingRequests });
       } catch (e: any) {
         console.error("Failed to fetch stats", e);
         setError("データの取得に失敗しました。");

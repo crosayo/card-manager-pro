@@ -35,6 +35,18 @@ export const INITIAL_SYSTEM_INFO: SystemInfo = {
 // 本番環境初期値: 空配列
 export const INITIAL_ITEMS: Item[] = [];
 
-export const getRarityStyle = (rarity: string) => {
-  return 'bg-slate-100 text-slate-600 border-slate-200';
+export const RARITY_STYLES: Record<string, { bg: string; text: string; border: string }> = {
+  'UR': { bg: 'bg-yellow-50',  text: 'text-yellow-800', border: 'border-yellow-300' },
+  'SR': { bg: 'bg-purple-50',  text: 'text-purple-800', border: 'border-purple-300' },
+  'R':  { bg: 'bg-blue-50',    text: 'text-blue-800',   border: 'border-blue-300'   },
+  'N':  { bg: 'bg-slate-100',  text: 'text-slate-600',  border: 'border-slate-300'  },
+};
+
+export const RARITY_DEFAULT_STYLE = {
+  bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-slate-200'
+};
+
+export const getRarityStyle = (rarity: string): string => {
+  const style = RARITY_STYLES[rarity] ?? RARITY_DEFAULT_STYLE;
+  return `${style.bg} ${style.text} border ${style.border}`;
 };

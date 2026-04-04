@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, Suspense } from 'react';
 import { Database, Menu } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { ToastContainer } from '../ui/Toast';
+import { CartFloat } from '../ui/CartFloat';
 import { useAppContext } from '@/context/AppContext';
 
 export const AppShell = ({ children }: { children: React.ReactNode }) => {
@@ -24,17 +25,20 @@ export const AppShell = ({ children }: { children: React.ReactNode }) => {
          </button>
       </div>
 
-      <Sidebar 
-        isMobileMenuOpen={isMobileMenuOpen}
-        setIsMobileMenuOpen={setIsMobileMenuOpen}
-        products={products}
-        isAdmin={isAdmin}
-        handleLoginToggle={handleLoginToggle}
-        isLoading={isLoading}
-      />
+      <Suspense fallback={<div className="fixed top-0 left-0 h-screen w-64 bg-slate-900" />}>
+        <Sidebar
+          isMobileMenuOpen={isMobileMenuOpen}
+          setIsMobileMenuOpen={setIsMobileMenuOpen}
+          products={products}
+          isAdmin={isAdmin}
+          handleLoginToggle={handleLoginToggle}
+          isLoading={isLoading}
+        />
+      </Suspense>
 
       <div className="md:ml-64 flex-1 relative pt-16 md:pt-0">
         {children}
+        <CartFloat />
       </div>
     </div>
   );

@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Shield, Loader2, Save, FileUp, Database, AlertCircle, CheckCircle2, List, Copy, Terminal, Download, Trash2, AlertTriangle, RefreshCw, Calendar, Plus, Wand2, Upload, ArrowUp, ArrowDown, X, Monitor } from 'lucide-react';
+import { Settings, Shield, Loader2, Save, FileUp, Database, AlertCircle, CheckCircle2, List, Copy, Terminal, Download, Trash2, AlertTriangle, RefreshCw, Calendar, Plus, Wand2, Upload, ArrowUp, ArrowDown, X, Monitor, Bell, Send } from 'lucide-react';
 import { api } from '../services/api';
 import { AppError, Season, ToastType } from '../types';
 import { useAppContext } from '../context/AppContext';
@@ -269,6 +269,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     requiredInput?: string; confirmLabel?: string; onConfirm: () => void;
   }>({ isOpen: false, title: '', message: '', variant: 'warning', onConfirm: () => {} });
 
+  // Discord Webhook URL State
+  const [discordWebhookUrl, setDiscordWebhookUrl] = useState('');
+  const [isSavingWebhook, setIsSavingWebhook] = useState(false);
+  const [isTestingSending, setIsTestingSending] = useState(false);
+
   // Sync state with context
   useEffect(() => {
     const isRemoteRarityDefault = JSON.stringify(rarities) === JSON.stringify(INITIAL_RARITIES);
@@ -296,6 +301,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
      }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [systemInfo]);
+
+  // Discord Webhook URL の読み込み
+  useEffect(() => {
+    api.fetchDiscordWebhookUrl().then(setDiscordWebhookUrl).catch(() => {});
+  }, []);
+
+  const saveDiscordWebhookUrl = async () => {
+    setIsSavingWebhook(true);
+    try {
+      await api.updateDiscordWebhookUrl(discordWebhookUrl);
+      addToast('success', '保存しました', 'Discord Webhook URLを保存しました。');
+    } catch (e: any) {
+      addToast('error', '保存失敗', e.message);
+    } finally {
+      setIsSavingWebhook(false);
+    }
+  };
+
+  const sendDiscordTestMessage = async () => {
+    if (!discordWebhookUrl.trim()) {
+      addToast('error', 'URLが未入力です', 'Webhook URLを入力してください。');
+      return;
+    }
+    setIsTestingSending(true);
+    try {
+      const res = await fetch(discordWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: '【Card Manager Pro】Discord通知のテストです。' }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      addToast('success', 'テスト送信成功', 'Discordへの通知が正常に送信されました。');
+    } catch (e: any) {
+      addToast('error', 'テスト送信失敗', `送信に失敗しました: ${e.message}`);
+    } finally {
+      setIsTestingSending(false);
+    }
+  };
 
   const copyToClipboard = (text: string, title: string) => {
     navigator.clipboard.writeText(text);
@@ -805,6 +848,48 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <p className="text-xs text-slate-400 mt-2">
               ※ バックアップファイル(.json)を読み込んでデータベースを復元します。IDが重複するデータは上書きされます。
             </p>
+          </div>
+
+          {/* 通知設定 */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <div className="flex justify-between items-center mb-4 border-b pb-2">
+              <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2">
+                <Bell className="text-cyan-600" /> 通知設定
+              </h3>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">Discord Webhook URL</label>
+                <p className="text-xs text-slate-500 mb-2">
+                  リクエスト受信時にDiscordへ通知します。DiscordのチャンネルからWebhook URLを取得して入力してください。
+                </p>
+                <input
+                  type="url"
+                  value={discordWebhookUrl}
+                  onChange={(e) => setDiscordWebhookUrl(e.target.value)}
+                  placeholder="https://discord.com/api/webhooks/..."
+                  className="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500 outline-none"
+                />
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={saveDiscordWebhookUrl}
+                  disabled={isSavingWebhook}
+                  className="bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isSavingWebhook ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+                  保存
+                </button>
+                <button
+                  onClick={sendDiscordTestMessage}
+                  disabled={isTestingSending || !discordWebhookUrl.trim()}
+                  className="bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isTestingSending ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                  テスト送信
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Danger Zone */}

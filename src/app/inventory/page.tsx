@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { InventoryList } from '@/views/InventoryList';
 import { useAppContext } from '@/context/AppContext';
@@ -10,28 +10,33 @@ import { Item, SortConfig } from '@/types';
 import { Loader2 } from 'lucide-react';
 
 function InventoryPageContent() {
-  const { isAdmin, handleLoginToggle, news, isLoading, addToast, setIsLoading, products } = useAppContext();
+  const { isAdmin, handleLoginToggle, news, isLoading, addToast, setIsLoading, products, rarities, selectedRarities, setSelectedRarities, showOnlyInStock, setShowOnlyInStock } = useAppContext();
   const searchParams = useSearchParams();
   
   // 状態管理
   const [items, setItems] = useState<Item[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [pendingQuantities, setPendingQuantities] = useState<Record<number, number>>({});
   const [searchKeyword, setSearchKeyword] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 50;
   
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'releaseDate', direction: 'desc' });
-  const [showZeroStock, setShowZeroStock] = useState(true);
-  
+
   const categoryParam = searchParams.get('category');
   const selectedCategory = categoryParam ? decodeURIComponent(categoryParam) : null;
+
+  // pendingDeltaRef と processingRef（連打対策）
+  const pendingDeltaRef = useRef<Map<number, number>>(new Map());
+  const processingRef = useRef<Set<number>>(new Set());
 
   // データ取得ロジック
   useEffect(() => {
     if (selectedCategory) {
-       setCurrentPage(1);
+      setCurrentPage(1);
+      setSelectedRarities([]);
     }
-  }, [selectedCategory]);
+  }, [selectedCategory, setSelectedRarities]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -40,15 +45,18 @@ function InventoryPageContent() {
         const result = await api.fetchItems(
           currentPage,
           pageSize,
-          { 
-            category: selectedCategory, 
+          {
+            category: selectedCategory,
             search: searchKeyword,
-            showZeroStock 
+            showZeroStock: !showOnlyInStock,
+            rarities: selectedRarities.length > 0 ? selectedRarities : undefined,
           },
           sortConfig
         );
         setItems(result.data);
         setTotalCount(result.count);
+        // 仮減らし在庫の取得（失敗しても無視）
+        api.fetchPendingQuantities().then(setPendingQuantities).catch(() => {});
       } catch (e: any) {
         addToast('error', 'データ取得エラー', '在庫データの読み込みに失敗しました。', {
           code: e.code || 'FETCH_ERROR',
@@ -65,7 +73,7 @@ function InventoryPageContent() {
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [addToast, setIsLoading, currentPage, pageSize, selectedCategory, searchKeyword, sortConfig, showZeroStock]);
+  }, [addToast, setIsLoading, currentPage, pageSize, selectedCategory, searchKeyword, sortConfig, showOnlyInStock, selectedRarities, rarities]);
 
   const handleSort = (key: keyof Item | 'releaseDate') => {
     setSortConfig(current => ({
@@ -81,24 +89,41 @@ function InventoryPageContent() {
   };
 
   const updateStock = async (id: number, delta: number) => {
-    const oldItems = [...items];
-    // 楽観的UI更新: 即座に画面上の数値を変更する
+    // 楽観的UI更新（累積deltaで計算）
     setItems(prev => prev.map(item => {
-      if (item.id === id) {
-        return { ...item, stock: Math.max(0, item.stock + delta) };
-      }
-      return item;
+      if (item.id !== id) return item;
+      const pending = pendingDeltaRef.current.get(id) ?? 0;
+      const newPending = pending + delta;
+      pendingDeltaRef.current.set(id, newPending);
+      return { ...item, stock: Math.max(0, item.stock + delta) };
     }));
 
+    // すでに処理中なら何もしない（後続のAPI呼び出しはまとめて送る）
+    if (processingRef.current.has(id)) return;
+    processingRef.current.add(id);
+
+    // 少し待ってから累積deltaをまとめて送信（デバウンス）
+    await new Promise(r => setTimeout(r, 100));
+
+    const totalDelta = pendingDeltaRef.current.get(id) ?? 0;
+    pendingDeltaRef.current.delete(id);
+    processingRef.current.delete(id);
+
+    if (totalDelta === 0) return;
+
     try {
-      // RPC経由で安全に増減
-      const updatedItem = await api.updateStock(id, delta);
-      // 成功時: サーバーからの正規の値を反映
+      const updatedItem = await api.updateStock(id, totalDelta);
       setItems(prev => prev.map(item => item.id === id ? updatedItem : item));
+      // ログ記録（失敗しても無視）
+      api.addStockLog({ itemId: id, delta: totalDelta, stockAfter: updatedItem.stock, source: 'manual' }).catch(() => {});
     } catch (e: any) {
-      // 失敗時: 元の状態に戻す
-      setItems(oldItems);
-      addToast('error', '在庫の更新に失敗しました', e.message);
+      // 失敗時: サーバーから現在値を取得して正確な値に戻す
+      try {
+        const current = await api.fetchItemById(id);
+        setItems(prev => prev.map(item => item.id === id ? current : item));
+      } catch {
+        addToast('error', '在庫の更新に失敗しました', 'ページを再読み込みしてください。');
+      }
     }
   };
 
@@ -166,8 +191,7 @@ function InventoryPageContent() {
       onAddItem={handleAddItem}
       onUpdateItem={handleUpdateItem}
       onDeleteItem={handleDeleteItem}
-      showZeroStock={showZeroStock}
-      setShowZeroStock={(val) => { setShowZeroStock(val); setCurrentPage(1); }}
+      pendingQuantities={pendingQuantities}
     />
   );
 }

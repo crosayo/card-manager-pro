@@ -57,9 +57,72 @@ export type SortConfig = {
   direction: 'asc' | 'desc';
 };
 
-export type TabType = 'dashboard' | 'inventory' | 'products' | 'scraper' | 'settings';
+export type TabType = 'dashboard' | 'inventory' | 'requests' | 'products' | 'logs' | 'scraper' | 'settings' | 'supplies';
 
 export type PaginatedItems = {
   data: Item[];
   count: number;
+};
+
+export interface StockLog {
+  id: number;
+  itemId: number | null;
+  supplyId: number | null;
+  delta: number;
+  stockAfter: number;
+  source: 'manual' | 'request' | 'csv';
+  requestId: number | null;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface CardRequest {
+  id: number;
+  token: string;
+  requesterName: string;
+  message: string | null;
+  status: 'pending' | 'completed' | 'cancelled';
+  priceTotal: number | null;
+  adminMemo: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+  items?: RequestItem[];
+}
+
+export interface RequestItem {
+  id: number;
+  requestId: number;
+  itemId: number | null;
+  supplyId: number | null;
+  quantity: number;
+  unitPrice: number | null;
+  item?: Item;
+  supply?: Supply;
+}
+
+export interface RequestEditLog {
+  id: number;
+  requestId: number;
+  editorName: string;
+  fieldChanged: string;
+  oldValue: string | null;
+  newValue: string | null;
+  createdAt: string;
+}
+
+export interface Supply {
+  id: number;
+  name: string;
+  category: 'sleeve' | 'playmat' | 'other';
+  imageUrl: string | null;
+  stock: number;
+  releaseDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const SUPPLY_CATEGORY_LABELS: Record<Supply['category'], string> = {
+  sleeve: 'スリーブ',
+  playmat: 'プレイマット',
+  other: 'その他',
 };

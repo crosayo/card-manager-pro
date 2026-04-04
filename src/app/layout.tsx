@@ -4,6 +4,7 @@ import { Noto_Sans_JP } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/layout/AppShell";
 import { AppProvider } from "@/context/AppContext";
+import { CartProvider } from "@/context/CartContext";
 
 const notoSansJP = Noto_Sans_JP({ 
   subsets: ["latin"],
@@ -25,9 +26,11 @@ export default function RootLayout({
     <html lang="ja">
       <body className={notoSansJP.className}>
         <AppProvider>
-          <AppShell>
-            {children}
-          </AppShell>
+          <CartProvider>
+            <AppShell>
+              {children}
+            </AppShell>
+          </CartProvider>
         </AppProvider>
       </body>
     </html>

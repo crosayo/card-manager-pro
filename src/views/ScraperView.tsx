@@ -65,6 +65,33 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
     addToast('info', 'URLセット', 'プリセットURLをセットしました。「解析実行」ボタンを押してください。');
   };
 
+  const fetchAndParseUrl = async (targetUrl: string): Promise<ScrapedItem[]> => {
+    const response = await fetch('/api/scrape', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: targetUrl })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.details || data.error || '解析に失敗しました');
+    }
+
+    if (!data.items || !Array.isArray(data.items)) {
+      throw new Error('有効なデータが見つかりませんでした');
+    }
+
+    return data.items.map((item: any) => ({
+      name: normalizeCardName(item.name || ''),
+      cardId: normalizeCardName(item.cardId || ''),
+      rarity: item.rarity || 'N',
+      stock: item.stock || 0,
+      category: item.category || '',
+      _tempId: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)
+    }));
+  };
+
   const analyzeUrl = async () => {
     if (!url) {
       addToast('error', 'URL未入力', 'WikiのURLを入力するか、プリセットから選択してください。');
@@ -76,54 +103,25 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
     setImportStatus('idle');
 
     try {
-      const response = await fetch('/api/scrape', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url })
-      });
+      const itemsWithIds = await fetchAndParseUrl(url);
+      setScrapedItems(itemsWithIds);
 
-      const data = await response.json();
+      // パック名の自動判別とフォーム入力
+      if (itemsWithIds.length > 0 && itemsWithIds[0].category) {
+        const scrapedCategory = itemsWithIds[0].category;
+        const match = products.find(p => p.name === scrapedCategory);
 
-      if (!response.ok) {
-        throw new Error(data.details || data.error || '解析に失敗しました');
-      }
-
-      if (data.items && Array.isArray(data.items)) {
-        // 一時IDを付与 + 即座に正規化して表示
-        const itemsWithIds: ScrapedItem[] = data.items.map((item: any) => ({
-          name: normalizeCardName(item.name || ''),
-          cardId: normalizeCardName(item.cardId || ''),
-          rarity: item.rarity || 'N',
-          stock: item.stock || 0,
-          category: item.category || '',
-          _tempId: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)
-        }));
-
-        setScrapedItems(itemsWithIds);
-        
-        // パック名の自動判別とフォーム入力
-        if (itemsWithIds.length > 0 && itemsWithIds[0].category) {
-           const scrapedCategory = itemsWithIds[0].category;
-           const match = products.find(p => p.name === scrapedCategory);
-           
-           if (match) {
-             setProductMode('existing');
-             setSelectedProductId(match.id);
-             addToast('success', '解析完了', `${itemsWithIds.length}件取得。既存のパック「${match.name}」と一致しました。`);
-           } else {
-             setProductMode('new');
-             setNewProductData(prev => ({ 
-               ...prev, 
-               name: scrapedCategory 
-             }));
-             addToast('success', '解析完了', `${itemsWithIds.length}件取得。新規パックとして登録準備ができました。`);
-           }
+        if (match) {
+          setProductMode('existing');
+          setSelectedProductId(match.id);
+          addToast('success', '解析完了', `${itemsWithIds.length}件取得。既存のパック「${match.name}」と一致しました。`);
         } else {
-            addToast('success', '解析完了', `${itemsWithIds.length}件のカード情報が見つかりました。`);
+          setProductMode('new');
+          setNewProductData(prev => ({ ...prev, name: scrapedCategory }));
+          addToast('success', '解析完了', `${itemsWithIds.length}件取得。新規パックとして登録準備ができました。`);
         }
-
       } else {
-        throw new Error('有効なデータが見つかりませんでした');
+        addToast('success', '解析完了', `${itemsWithIds.length}件のカード情報が見つかりました。`);
       }
 
     } catch (e: any) {
@@ -132,6 +130,21 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
         message: e.message,
         timestamp: new Date().toLocaleString()
       });
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const reanalyzeUrl = async () => {
+    if (!url) return;
+    setIsAnalyzing(true);
+    try {
+      const itemsWithIds = await fetchAndParseUrl(url);
+      setScrapedItems(itemsWithIds);
+      addToast('success', '再解析完了', `${itemsWithIds.length}件のデータを取得しました。`);
+    } catch (e: any) {
+      addToast('error', '再解析エラー', e.message);
+      // 既存の結果は維持する
     } finally {
       setIsAnalyzing(false);
     }
@@ -453,8 +466,16 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
               <h4 className="font-bold text-slate-700">解析結果詳細 ({scrapedItems.length}件)</h4>
-              <div className="text-xs text-slate-500">
-                リストの内容は直接編集可能です。
+              <div className="flex items-center gap-3">
+                <div className="text-xs text-slate-500">リストの内容は直接編集可能です。</div>
+                <button
+                  onClick={reanalyzeUrl}
+                  disabled={isAnalyzing || globalIsLoading}
+                  className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {isAnalyzing ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />}
+                  再解析
+                </button>
               </div>
             </div>
             

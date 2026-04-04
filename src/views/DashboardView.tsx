@@ -3,7 +3,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { LayoutDashboard, Layers, Package, AlertCircle, Info, Plus, X, Trash2, Calendar, Search, Megaphone, Bell, ArrowRight, Download, Database } from 'lucide-react';
+import { LayoutDashboard, Layers, Package, AlertCircle, Info, Plus, X, Trash2, Calendar, Search, Megaphone, Bell, ArrowRight, Download, Database, Inbox } from 'lucide-react';
 import { StatsWidget } from '../components/ui/StatsWidget';
 import { useAppContext } from '@/context/AppContext';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -13,6 +13,7 @@ interface DashboardViewProps {
     totalCards: number;
     totalStock: number;
     lowStock: number;
+    pendingRequests: number;
   };
 }
 
@@ -92,28 +93,42 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ stats }) => {
       </div>
       
       {/* 2. 統計情報 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <StatsWidget 
-          label="登録カード種類" 
-          value={stats.totalCards.toLocaleString()} 
-          icon={Layers} 
-          color="bg-blue-600" 
-          subtext="DB登録済みのユニーク型番数" 
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <StatsWidget
+          label="登録カード種類"
+          value={stats.totalCards.toLocaleString()}
+          icon={Layers}
+          color="bg-blue-600"
+          subtext="DB登録済みのユニーク型番数"
         />
-        <StatsWidget 
-          label="総在庫数" 
-          value={stats.totalStock.toLocaleString()} 
-          icon={Package} 
-          color="bg-emerald-600" 
-          subtext="全カードの物理在庫合計" 
+        <StatsWidget
+          label="総在庫数"
+          value={stats.totalStock.toLocaleString()}
+          icon={Package}
+          color="bg-emerald-600"
+          subtext="全カードの物理在庫合計"
         />
-        <StatsWidget 
-          label="欠品アラート" 
-          value={stats.lowStock.toLocaleString()} 
-          icon={AlertCircle} 
-          color="bg-rose-600" 
-          subtext="在庫1枚以下の重要項目" 
+        <StatsWidget
+          label="欠品アラート"
+          value={stats.lowStock.toLocaleString()}
+          icon={AlertCircle}
+          color="bg-rose-600"
+          subtext="在庫1枚以下の重要項目"
         />
+        <Link href="/requests" className="block hover:shadow-md transition-shadow rounded-xl">
+          <div className={`bg-white p-4 rounded-xl shadow-sm border flex items-start gap-4 ${stats.pendingRequests > 0 ? 'border-cyan-300' : 'border-slate-100'}`}>
+            <div className={`p-3 rounded-lg ${stats.pendingRequests > 0 ? 'bg-cyan-600' : 'bg-slate-400'} bg-opacity-10`}>
+              <Inbox size={24} className={stats.pendingRequests > 0 ? 'text-cyan-600' : 'text-slate-400'} />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">未対応リクエスト</p>
+              <h3 className={`text-2xl font-bold ${stats.pendingRequests > 0 ? 'text-cyan-600' : 'text-slate-800'}`}>
+                {stats.pendingRequests.toLocaleString()}
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">クリックして確認</p>
+            </div>
+          </div>
+        </Link>
       </div>
 
       {/* 3. お知らせ掲示板（メインコンテンツ） */}
