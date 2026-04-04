@@ -45,6 +45,7 @@ const mapDbStockLogToAppStockLog = (db: any): StockLog => ({
   createdAt: db.created_at,
   itemName: db.items?.name ?? null,
   itemCardId: db.items?.card_id ?? null,
+  itemRarity: db.items?.rarity ?? null,
   supplyName: db.supplies?.name ?? null,
 });
 
@@ -733,7 +734,7 @@ export const api = {
     ensureConnection();
     const { data, error } = await supabase
       .from('stock_logs')
-      .select('*, items(name, card_id), supplies(name)')
+      .select('*, items(name, card_id, rarity), supplies(name)')
       .order('created_at', { ascending: false })
       .limit(limit);
     if (error) {

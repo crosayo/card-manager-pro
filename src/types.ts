@@ -76,6 +76,7 @@ export interface StockLog {
   createdAt: string;
   itemName?: string | null;
   itemCardId?: string | null;
+  itemRarity?: string | null;
   supplyName?: string | null;
 }
 
