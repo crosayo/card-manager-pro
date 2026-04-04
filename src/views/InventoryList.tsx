@@ -66,6 +66,8 @@ export const InventoryList: React.FC<InventoryListProps> = ({
   
   // Sort Dropdown State
   const [isSortOpen, setIsSortOpen] = useState(false);
+  // Filter Dropdown State
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
   
   // CSV Import State
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -362,12 +364,12 @@ export const InventoryList: React.FC<InventoryListProps> = ({
           </div>
         </div>
         
-        {/* 下段: ソート */}
+        {/* 下段: ソート + フィルター */}
         <div className="flex flex-col sm:flex-row gap-2 justify-between items-start sm:items-center text-sm border-t border-slate-100 pt-3">
           <div className="flex gap-2 items-center w-full sm:w-auto relative">
              {/* ソートボタン (クリック式) */}
              <button
-               onClick={() => setIsSortOpen(!isSortOpen)}
+               onClick={() => { setIsSortOpen(!isSortOpen); setIsFilterOpen(false); }}
                className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg text-slate-700 hover:bg-slate-100 transition-colors"
              >
                <ArrowUpDown size={14} />
@@ -386,7 +388,6 @@ export const InventoryList: React.FC<InventoryListProps> = ({
              {/* ドロップダウンメニュー (クリックで開閉) */}
              {isSortOpen && setSortDirectly && (
                <>
-                 {/* 閉じるためのオーバーレイ */}
                  <div className="fixed inset-0 z-20 cursor-default" onClick={() => setIsSortOpen(false)}></div>
                  <div className="absolute top-full left-0 mt-1 w-56 bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden z-30 animate-in fade-in zoom-in-95 duration-100">
                    <div className="py-1">
@@ -404,6 +405,99 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                  </div>
                </>
              )}
+
+             {/* フィルターボタン */}
+             <div className="relative">
+               <button
+                 onClick={() => { setIsFilterOpen(!isFilterOpen); setIsSortOpen(false); }}
+                 className={`flex items-center gap-2 border px-3 py-1.5 rounded-lg transition-colors ${
+                   selectedRarities.length > 0 || showOnlyInStock
+                     ? 'bg-cyan-50 border-cyan-300 text-cyan-700 hover:bg-cyan-100'
+                     : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                 }`}
+               >
+                 <Filter size={14} />
+                 <span>フィルター</span>
+                 {(selectedRarities.length > 0 || showOnlyInStock) && (
+                   <span className="bg-cyan-600 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center leading-none">
+                     {selectedRarities.length + (showOnlyInStock ? 1 : 0)}
+                   </span>
+                 )}
+               </button>
+
+               {/* フィルタードロップダウン */}
+               {isFilterOpen && (
+                 <>
+                   <div className="fixed inset-0 z-20 cursor-default" onClick={() => setIsFilterOpen(false)}></div>
+                   <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-xl z-30 animate-in fade-in zoom-in-95 duration-100">
+                     <div className="p-3 space-y-3">
+                       {/* レアリティフィルター */}
+                       <div>
+                         <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">レアリティ</p>
+                         <div className="flex flex-wrap gap-1">
+                           {(() => {
+                             const availableRarities = selectedCategory
+                               ? rarities.filter(r => items.some(item => item.rarity === r))
+                               : rarities;
+                             return availableRarities.map(r => {
+                               const style = RARITY_STYLES[r] ?? RARITY_DEFAULT_STYLE;
+                               const isSelected = selectedRarities.includes(r);
+                               return (
+                                 <button
+                                   key={r}
+                                   onClick={() => {
+                                     if (isSelected) {
+                                       setSelectedRarities(selectedRarities.filter(x => x !== r));
+                                     } else {
+                                       setSelectedRarities([...selectedRarities, r]);
+                                     }
+                                   }}
+                                   className={`px-2 py-0.5 rounded text-xs font-bold border transition-all ${
+                                     isSelected
+                                       ? `${style.bg} ${style.text} ${style.border} ring-1 ring-offset-1`
+                                       : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+                                   }`}
+                                 >
+                                   {r}
+                                 </button>
+                               );
+                             });
+                           })()}
+                         </div>
+                       </div>
+
+                       {/* 在庫フィルター */}
+                       <div className="border-t border-slate-100 pt-2">
+                         <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">在庫</p>
+                         <button
+                           onClick={() => setShowOnlyInStock(!showOnlyInStock)}
+                           className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-medium transition-all ${
+                             showOnlyInStock
+                               ? 'bg-amber-50 text-amber-700 border-amber-300'
+                               : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                           }`}
+                         >
+                           <span className={`w-3 h-3 rounded-full border-2 flex-shrink-0 ${showOnlyInStock ? 'bg-amber-400 border-amber-400' : 'border-slate-400'}`} />
+                           在庫ありのみ表示
+                         </button>
+                       </div>
+
+                       {/* リセット */}
+                       {(selectedRarities.length > 0 || showOnlyInStock) && (
+                         <div className="border-t border-slate-100 pt-2 text-right">
+                           <button
+                             onClick={() => { setSelectedRarities([]); setShowOnlyInStock(false); }}
+                             className="text-xs text-slate-400 hover:text-slate-600 underline"
+                           >
+                             すべて解除
+                           </button>
+                         </div>
+                       )}
+                     </div>
+                   </div>
+                 </>
+               )}
+             </div>
           </div>
         </div>
 

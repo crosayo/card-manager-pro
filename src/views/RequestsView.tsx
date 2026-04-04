@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { ShoppingBag, Loader2, ChevronDown, ChevronRight, Check, X, Edit3, AlertCircle } from 'lucide-react';
+import { ShoppingBag, Loader2, ChevronDown, ChevronRight, Check, X, Edit3, AlertCircle, Trash2 } from 'lucide-react';
 import { CardRequest, RequestItem, RequestEditLog } from '@/types';
 import { api } from '@/services/api';
 import { useAppContext } from '@/context/AppContext';
@@ -92,7 +92,8 @@ export const RequestsView: React.FC = () => {
 
   const startEdit = (req: CardRequest) => {
     setEditingId(req.id);
-    setEditNameInput('');
+    // 管理者の場合は名前確認不要なので requesterName を自動設定
+    setEditNameInput(isAdmin ? req.requesterName : '');
     setNameError('');
     setEditMessage(req.message || '');
     const qtys: Record<number, number> = {};
@@ -212,6 +213,25 @@ export const RequestsView: React.FC = () => {
     });
   };
 
+  const handleDelete = (req: CardRequest) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'リクエストを削除',
+      message: `「${req.requesterName}」のリクエストを完全に削除しますか？この操作は取り消せません。`,
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        try {
+          await api.deleteRequest(req.id);
+          setRequests(prev => prev.filter(r => r.id !== req.id));
+          addToast('success', '削除完了', 'リクエストを削除しました。');
+        } catch (e: any) {
+          addToast('error', '削除失敗', e.message);
+        }
+      },
+    });
+  };
+
   return (
     <div className="p-4 md:p-8 pb-20">
       <div className="flex justify-between items-center mb-6">
@@ -277,18 +297,20 @@ export const RequestsView: React.FC = () => {
               <div className="p-4">
                 {editingId === req.id ? (
                   <div className="space-y-3">
-                    {/* 名前確認 */}
-                    <div>
-                      <label className="text-xs font-bold text-slate-600 mb-1 block">本人確認: お名前を入力してください</label>
-                      <input
-                        type="text"
-                        value={editNameInput}
-                        onChange={(e) => { setEditNameInput(e.target.value); setNameError(''); }}
-                        className={`w-full border rounded px-3 py-1.5 text-sm focus:ring-2 focus:ring-cyan-500 outline-none ${nameError ? 'border-red-400' : 'border-slate-300'}`}
-                        placeholder="送信時に入力したお名前"
-                      />
-                      {nameError && <p className="text-red-500 text-xs mt-1 flex items-center gap-1"><AlertCircle size={10} />{nameError}</p>}
-                    </div>
+                    {/* 名前確認（ゲストのみ表示） */}
+                    {!isAdmin && (
+                      <div>
+                        <label className="text-xs font-bold text-slate-600 mb-1 block">本人確認: お名前を入力してください</label>
+                        <input
+                          type="text"
+                          value={editNameInput}
+                          onChange={(e) => { setEditNameInput(e.target.value); setNameError(''); }}
+                          className={`w-full border rounded px-3 py-1.5 text-sm focus:ring-2 focus:ring-cyan-500 outline-none ${nameError ? 'border-red-400' : 'border-slate-300'}`}
+                          placeholder="送信時に入力したお名前"
+                        />
+                        {nameError && <p className="text-red-500 text-xs mt-1 flex items-center gap-1"><AlertCircle size={10} />{nameError}</p>}
+                      </div>
+                    )}
 
                     {/* 数量編集 */}
                     {req.items?.map(ri => (
@@ -316,7 +338,7 @@ export const RequestsView: React.FC = () => {
                       <button onClick={cancelEdit} className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded">キャンセル</button>
                       <button
                         onClick={() => submitEdit(req)}
-                        disabled={isUpdating || !editNameInput.trim()}
+                        disabled={isUpdating || (!isAdmin && !editNameInput.trim())}
                         className="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded text-sm font-bold flex items-center gap-1 disabled:opacity-50"
                       >
                         {isUpdating ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
@@ -380,9 +402,20 @@ export const RequestsView: React.FC = () => {
               </div>
 
               {/* フッター操作ボタン */}
-              {req.status === 'pending' && (
-                <div className="px-4 py-3 border-t border-slate-100 bg-slate-50 flex gap-2 justify-end">
-                  {!isAdmin && editingId !== req.id && (
+              {(req.status === 'pending' || isAdmin) && (
+                <div className="px-4 py-3 border-t border-slate-100 bg-slate-50 flex gap-2 justify-end flex-wrap">
+                  {/* 削除ボタン（管理者のみ、左寄せ） */}
+                  {isAdmin && (
+                    <button
+                      onClick={() => handleDelete(req)}
+                      className="px-3 py-1.5 text-sm text-red-500 hover:bg-red-50 border border-red-200 rounded flex items-center gap-1 mr-auto"
+                    >
+                      <Trash2 size={14} /> 削除
+                    </button>
+                  )}
+
+                  {/* ゲストの編集ボタン */}
+                  {!isAdmin && req.status === 'pending' && editingId !== req.id && (
                     <button
                       onClick={() => startEdit(req)}
                       className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-200 bg-slate-100 rounded flex items-center gap-1"
@@ -390,8 +423,18 @@ export const RequestsView: React.FC = () => {
                       <Edit3 size={14} /> 編集
                     </button>
                   )}
-                  {isAdmin && (
+
+                  {/* 管理者の操作ボタン */}
+                  {isAdmin && req.status === 'pending' && (
                     <>
+                      {editingId !== req.id && (
+                        <button
+                          onClick={() => startEdit(req)}
+                          className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-200 bg-slate-100 rounded flex items-center gap-1"
+                        >
+                          <Edit3 size={14} /> 編集
+                        </button>
+                      )}
                       <button
                         onClick={() => handleCancel(req)}
                         className="px-3 py-1.5 text-sm text-slate-500 hover:bg-red-50 hover:text-red-600 border border-slate-200 rounded flex items-center gap-1"

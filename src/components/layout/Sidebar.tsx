@@ -7,7 +7,6 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { Database, X, LayoutDashboard, Layers, Menu, Download, Settings, LogOut, LogIn, Calendar, ChevronDown, ChevronRight, Folder, Info, ScrollText, ShoppingBag, Package, Inbox } from 'lucide-react';
 import { Product, TabType, Season } from '@/types';
 import { useAppContext } from '@/context/AppContext';
-import { RARITY_STYLES, RARITY_DEFAULT_STYLE } from '@/constants';
 import { api } from '@/services/api';
 
 interface SidebarProps {
@@ -31,7 +30,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { seasons, systemInfo, rarities, selectedRarities, setSelectedRarities, showOnlyInStock, setShowOnlyInStock } = useAppContext();
+  const { seasons, systemInfo } = useAppContext();
   const [expandedSeasons, setExpandedSeasons] = useState<Record<string, boolean>>({});
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
   const [isSuppliesOpen, setIsSuppliesOpen] = useState(false);
@@ -201,69 +200,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           <div className="px-3 pb-8">
-            {/* フィルターパネル */}
-            <div className="px-3 pt-4 pb-3 border-t border-slate-800 space-y-3">
-              {/* レアリティフィルター */}
-              <div>
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">レアリティ</p>
-                <div className="flex flex-wrap gap-1">
-                  {(() => {
-                    // 選択中パックに存在するレアリティのみ表示（未選択時は全レアリティ）
-                    const availableRarities = selectedCategory
-                      ? rarities.filter(r => products.some(p => p.name === selectedCategory))
-                      : rarities;
-                    return rarities.map(r => {
-                      const style = RARITY_STYLES[r] ?? RARITY_DEFAULT_STYLE;
-                      const isSelected = selectedRarities.includes(r);
-                      return (
-                        <button
-                          key={r}
-                          onClick={() => {
-                            if (isSelected) {
-                              setSelectedRarities(selectedRarities.filter(x => x !== r));
-                            } else {
-                              setSelectedRarities([...selectedRarities, r]);
-                            }
-                          }}
-                          className={`px-2 py-0.5 rounded text-xs font-bold border transition-all ${
-                            isSelected
-                              ? `${style.bg} ${style.text} ${style.border} ring-1 ring-offset-1 ring-offset-slate-900`
-                              : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
-                          }`}
-                        >
-                          {r}
-                        </button>
-                      );
-                    });
-                  })()}
-                </div>
-                {selectedRarities.length > 0 && (
-                  <button
-                    onClick={() => setSelectedRarities([])}
-                    className="text-xs text-slate-500 hover:text-slate-300 mt-1 underline"
-                  >
-                    解除
-                  </button>
-                )}
-              </div>
-
-              {/* 在庫フィルター */}
-              <div>
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">在庫</p>
-                <button
-                  onClick={() => setShowOnlyInStock(!showOnlyInStock)}
-                  className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-bold transition-all ${
-                    showOnlyInStock
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-600'
-                      : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
-                  }`}
-                >
-                  <span className={`w-3 h-3 rounded-full border-2 flex-shrink-0 ${showOnlyInStock ? 'bg-amber-400 border-amber-400' : 'border-slate-500'}`} />
-                  在庫ありのみ表示
-                </button>
-              </div>
-            </div>
-
             {/* サプライセクション */}
             <div className="border-t border-slate-800 pt-3 mb-2">
               <button

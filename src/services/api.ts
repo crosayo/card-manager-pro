@@ -43,6 +43,9 @@ const mapDbStockLogToAppStockLog = (db: any): StockLog => ({
   requestId: db.request_id,
   note: db.note,
   createdAt: db.created_at,
+  itemName: db.items?.name ?? null,
+  itemCardId: db.items?.card_id ?? null,
+  supplyName: db.supplies?.name ?? null,
 });
 
 const mapDbRequestItemToAppRequestItem = (db: any): RequestItem => ({
@@ -730,7 +733,7 @@ export const api = {
     ensureConnection();
     const { data, error } = await supabase
       .from('stock_logs')
-      .select('*')
+      .select('*, items(name, card_id), supplies(name)')
       .order('created_at', { ascending: false })
       .limit(limit);
     if (error) {
@@ -889,6 +892,19 @@ export const api = {
       if (error.code === '42P01') return;
       handleSupabaseError(error, 'addRequestEditLog');
     }
+  },
+
+  deleteRequest: async (requestId: number): Promise<void> => {
+    ensureConnection();
+    // 関連する request_items を先に削除
+    const { error: itemsError } = await supabase.from('request_items').delete().eq('request_id', requestId);
+    if (itemsError) handleSupabaseError(itemsError, 'deleteRequest(items)');
+    // request_edit_logs を削除
+    const { error: logsError } = await supabase.from('request_edit_logs').delete().eq('request_id', requestId);
+    if (logsError && logsError.code !== '42P01') handleSupabaseError(logsError, 'deleteRequest(logs)');
+    // リクエスト本体を削除
+    const { error } = await supabase.from('requests').delete().eq('id', requestId);
+    if (error) handleSupabaseError(error, 'deleteRequest');
   },
 
   fetchRequestEditLogs: async (requestId: number): Promise<RequestEditLog[]> => {

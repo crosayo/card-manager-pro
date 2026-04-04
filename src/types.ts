@@ -74,6 +74,9 @@ export interface StockLog {
   requestId: number | null;
   note: string | null;
   createdAt: string;
+  itemName?: string | null;
+  itemCardId?: string | null;
+  supplyName?: string | null;
 }
 
 export interface CardRequest {
