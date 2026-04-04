@@ -202,9 +202,30 @@ export const api = {
   ): Promise<PaginatedItems> => {
     ensureConnection();
 
-    // 発売日順ソート: 発売日→型番→レアリティ表示順の3段ソート
+    // 発売日順ソート: RPC関数でサーバー側ソート+ページネーション
     if (sort?.key === 'releaseDate') {
-      return api._fallbackReleaseDateSort(page, pageSize, filters, sort);
+      try {
+        const { data: rpcResult, error } = await supabase.rpc('fetch_items_by_release_date', {
+          p_direction:       sort.direction,
+          p_page:            page,
+          p_page_size:       pageSize,
+          p_category:        filters?.category ?? null,
+          p_search:          filters?.search ? getSearchTerm(filters.search) : null,
+          p_rarities:        (filters?.rarities && filters.rarities.length > 0) ? filters.rarities : null,
+          p_show_zero_stock: filters?.showZeroStock !== false,
+        });
+        if (error) {
+          // RPC未登録の場合はフォールバック
+          if (error.code === '42883') return api._fallbackReleaseDateSort(page, pageSize, filters, sort);
+          handleSupabaseError(error, 'fetchItems(RPC:fetch_items_by_release_date)');
+        }
+        return {
+          data:  ((rpcResult as any)?.data  || []).map(mapDbItemToAppItem),
+          count: (rpcResult  as any)?.count || 0,
+        };
+      } catch {
+        return api._fallbackReleaseDateSort(page, pageSize, filters, sort);
+      }
     }
     
     // --- 通常のServer-side Query (高速) ---
