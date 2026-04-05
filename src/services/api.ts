@@ -890,9 +890,12 @@ export const api = {
     // request_edit_logs を削除
     const { error: logsError } = await supabase.from('request_edit_logs').delete().eq('request_id', requestId);
     if (logsError && logsError.code !== '42P01') handleSupabaseError(logsError, 'deleteRequest(logs)');
-    // リクエスト本体を削除
-    const { error } = await supabase.from('requests').delete().eq('id', requestId);
+    // リクエスト本体を削除（.select()で実際に削除されたか確認）
+    const { data: deleted, error } = await supabase.from('requests').delete().eq('id', requestId).select();
     if (error) handleSupabaseError(error, 'deleteRequest');
+    if (!deleted || deleted.length === 0) {
+      throw new Error('削除に失敗しました。権限がないか、対象レコードが既に存在しません。');
+    }
   },
 
   fetchRequestEditLogs: async (requestId: number): Promise<RequestEditLog[]> => {
