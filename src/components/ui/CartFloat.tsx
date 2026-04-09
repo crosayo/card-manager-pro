@@ -101,7 +101,7 @@ export const CartFloat: React.FC = () => {
           </div>
         )}
 
-        {/* フローティ���グボタン本体 */}
+        {/* フローティングボタン本体 */}
         <button
           onClick={() => setIsOpen(!isOpen)}
           className="w-14 h-14 bg-cyan-600 hover:bg-cyan-700 text-white rounded-full shadow-lg flex items-center justify-center relative transition-transform active:scale-95"

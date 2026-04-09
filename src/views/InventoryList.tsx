@@ -214,7 +214,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
           addToast('success', '在庫更新完了', `${updates.length}件の在庫を更新しました。ページをリロードして反映を確認してください。`);
           // ログ記録（失敗しても無視）
           Promise.all(updates.map(u =>
-            api.addStockLog({ itemId: u.id, delta: 0, stockAfter: u.stock, source: 'csv', note: 'CSVインポ���ト' }).catch(() => {})
+            api.addStockLog({ itemId: u.id, delta: 0, stockAfter: u.stock, source: 'csv', note: 'CSVインポート' }).catch(() => {})
           ));
         } else {
           addToast('error', '更新データなし', '有効な更新データが見つかりませんでした。CSVの形式を確認してください。');
