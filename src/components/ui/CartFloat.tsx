@@ -38,8 +38,8 @@ export const CartFloat: React.FC = () => {
       setIsOpen(false);
       setRequesterName('');
       setMessage('');
-      addToast('success', 'リクエスト送���完了',
-        `リクエストを受け付けました。/requests ページで確認で���ます。`
+      addToast('success', 'リクエスト送信完了',
+        `リクエストを受け付けました。/requests ページで確認できます。`
       );
     } catch (e: any) {
       addToast('error', '送信失敗', e.message);
