@@ -205,7 +205,7 @@ export async function POST(req: NextRequest) {
       console.warn('HTMLパース結果0件。Geminiフルパースにフォールバック。');
       const truncatedHtml = html.substring(0, 500000);
       const fallbackResponse = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-1.5-flash',
         contents: `
 以下のHTMLからカードリストを抽出してください。
 カード名・型番は原文のまま抽出し省略・推測しないこと。
