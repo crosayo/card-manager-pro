@@ -192,7 +192,7 @@ export async function POST(req: NextRequest) {
     const charsetMatch = contentType.match(/charset=([\w-]+)/i);
     const charset = charsetMatch ? charsetMatch[1].toLowerCase() : 'euc-jp';
     const html = new TextDecoder(charset).decode(buffer);
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY, httpOptions: { apiVersion: 'v1' } });
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
     // Step 1: HTMLから型番・名前を直接抽出
     let rawEntries = parseFromTables(html);
@@ -205,7 +205,7 @@ export async function POST(req: NextRequest) {
       console.warn('HTMLパース結果0件。Geminiフルパースにフォールバック。');
       const truncatedHtml = html.substring(0, 500000);
       const fallbackResponse = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-1.5-flash-latest',
         contents: `
 以下のHTMLからカードリストを抽出してください。
 カード名・型番は原文のまま抽出し省略・推測しないこと。
@@ -239,7 +239,7 @@ HTML: ${truncatedHtml}
     const rarityInput = rawEntries.map((e, i) => `${i}|${e.cardId}|${e.rawRarity}`).join('\n');
 
     const rarityResponse = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-1.5-flash-latest',
       contents: `
 遊戯王カードのレアリティ情報を正規化してください。
 型番・名前は変更せず、レアリティの正規化のみ行うこと。
