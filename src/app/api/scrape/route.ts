@@ -239,7 +239,7 @@ HTML: ${truncatedHtml}
     const rarityInput = rawEntries.map((e, i) => `${i}|${e.cardId}|${e.rawRarity}`).join('\n');
 
     const rarityResponse = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-1.5-flash',
       contents: `
 遊戯王カードのレアリティ情報を正規化してください。
 型番・名前は変更せず、レアリティの正規化のみ行うこと。
