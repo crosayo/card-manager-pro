@@ -168,14 +168,15 @@ end;
 $$;
 
 -- 10. RPC関数 (発売日順ソート + サーバー側ページネーション)
+-- ※ api.ts の呼び出しパラメータと一致させること
 CREATE OR REPLACE FUNCTION public.fetch_items_by_release_date(
+  p_direction text DEFAULT 'desc',
   p_page integer DEFAULT 1,
   p_page_size integer DEFAULT 50,
   p_category text DEFAULT NULL,
   p_search text DEFAULT NULL,
-  p_search_normalized text DEFAULT NULL,
-  p_show_zero_stock boolean DEFAULT true,
-  p_sort_asc boolean DEFAULT false
+  p_rarities text[] DEFAULT NULL,
+  p_show_zero_stock boolean DEFAULT true
 )
 RETURNS json
 LANGUAGE plpgsql
@@ -185,7 +186,9 @@ DECLARE
   v_offset integer;
   v_total integer;
   v_items json;
+  v_sort_asc boolean;
 BEGIN
+  v_sort_asc := (p_direction = 'asc');
   v_offset := (p_page - 1) * p_page_size;
 
   SELECT count(*) INTO v_total
@@ -195,13 +198,9 @@ BEGIN
     AND (p_search IS NULL OR
          i.name ILIKE '%' || p_search || '%' OR
          i.card_id ILIKE '%' || p_search || '%' OR
-         i.category ILIKE '%' || p_search || '%' OR
-         (p_search_normalized IS NOT NULL AND (
-           i.name ILIKE '%' || p_search_normalized || '%' OR
-           i.card_id ILIKE '%' || p_search_normalized || '%' OR
-           i.category ILIKE '%' || p_search_normalized || '%'
-         )))
-    AND (p_show_zero_stock OR i.stock > 0);
+         i.category ILIKE '%' || p_search || '%')
+    AND (p_show_zero_stock OR i.stock > 0)
+    AND (p_rarities IS NULL OR i.rarity = ANY(p_rarities));
 
   SELECT json_agg(t) INTO v_items
   FROM (
@@ -212,16 +211,12 @@ BEGIN
       AND (p_search IS NULL OR
            i.name ILIKE '%' || p_search || '%' OR
            i.card_id ILIKE '%' || p_search || '%' OR
-           i.category ILIKE '%' || p_search || '%' OR
-           (p_search_normalized IS NOT NULL AND (
-             i.name ILIKE '%' || p_search_normalized || '%' OR
-             i.card_id ILIKE '%' || p_search_normalized || '%' OR
-             i.category ILIKE '%' || p_search_normalized || '%'
-           )))
+           i.category ILIKE '%' || p_search || '%')
       AND (p_show_zero_stock OR i.stock > 0)
+      AND (p_rarities IS NULL OR i.rarity = ANY(p_rarities))
     ORDER BY
-      CASE WHEN p_sort_asc THEN COALESCE(p.release_date, '1999-01-01') END ASC,
-      CASE WHEN NOT p_sort_asc THEN COALESCE(p.release_date, '1999-01-01') END DESC,
+      CASE WHEN v_sort_asc THEN COALESCE(p.release_date, '1999-01-01') END ASC,
+      CASE WHEN NOT v_sort_asc THEN COALESCE(p.release_date, '1999-01-01') END DESC,
       i.card_id ASC,
       i.rarity ASC
     LIMIT p_page_size OFFSET v_offset
