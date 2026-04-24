@@ -192,7 +192,7 @@ export async function POST(req: NextRequest) {
     const charsetMatch = contentType.match(/charset=([\w-]+)/i);
     const charset = charsetMatch ? charsetMatch[1].toLowerCase() : 'euc-jp';
     const html = new TextDecoder(charset).decode(buffer);
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY, httpOptions: { apiVersion: 'v1' } });
 
     // Step 1: HTMLから型番・名前を直接抽出
     let rawEntries = parseFromTables(html);
