@@ -42,34 +42,36 @@ function execAll(str: string, pattern: RegExp): RegExpExecArray[] {
 }
 
 // ── レアリティ正規化（Gemini不要・固定マッピング） ───────────────
-// 長い名称から先にマッチさせること（「シークレット」が「スーパーシークレット」等を誤検知しないよう）
-const RARITY_PATTERNS: Array<{ pattern: RegExp; code: string }> = [
-  { pattern: /クォーターセンチュリーシークレット|quarter.?century.?secret|25th.?se/i, code: '25thSE' },
-  { pattern: /プリズマティックシークレット|prismatic.?secret/i,                        code: 'PS' },
-  { pattern: /アルティメットレア|ultimate.?rare/i,                                     code: 'UL' },
-  { pattern: /シークレットレア|secret.?rare/i,                                         code: 'SE' },
-  { pattern: /ウルトラレア|ultra.?rare/i,                                              code: 'UR' },
-  { pattern: /スーパーレア|super.?rare/i,                                              code: 'SR' },
-  { pattern: /ノーマルパラレル|normal.?parallel/i,                                     code: 'NP' },
-  { pattern: /ノーマルレア|normal.?rare/i,                                             code: 'NR' },
-  { pattern: /ノーマル|^n$|^normal$/i,                                                 code: 'N' },
-  { pattern: /^レア$|^r$|^rare$/i,                                                     code: 'R' },
+// 複合レアリティを先にスキャンして除去し、残りでノーマル・レアを判定する
+const COMPOUND_RARITY_PATTERNS: Array<{ pattern: RegExp; code: string }> = [
+  { pattern: /クォーターセンチュリーシークレットレア|quarter.?century.?secret|25th.?se/gi, code: '25thSE' },
+  { pattern: /プリズマティックシークレットレア|prismatic.?secret/gi,                        code: 'PS' },
+  { pattern: /アルティメットレア|ultimate.?rare/gi,                                        code: 'UL' },
+  { pattern: /シークレットレア|secret.?rare/gi,                                            code: 'SE' },
+  { pattern: /ウルトラレア|ultra.?rare/gi,                                                 code: 'UR' },
+  { pattern: /スーパーレア|super.?rare/gi,                                                 code: 'SR' },
+  { pattern: /ノーマルパラレル|normal.?parallel/gi,                                        code: 'NP' },
+  { pattern: /ノーマルレア|normal.?rare/gi,                                                code: 'NR' },
 ];
 
 function normalizeRarity(rawRarity: string): string[] {
-  // スラッシュ・改行・全角スラッシュ・中点等で分割
-  const parts = rawRarity.split(/[\/／・\n,、]/);
+  let remaining = rawRarity;
   const results: string[] = [];
 
-  for (const part of parts) {
+  // Step1: 複合レアリティをスキャン・除去（スペース区切りでも検出できる）
+  for (const { pattern, code } of COMPOUND_RARITY_PATTERNS) {
+    if (pattern.test(remaining)) {
+      if (!results.includes(code)) results.push(code);
+      remaining = remaining.replace(new RegExp(pattern.source, 'gi'), ' ');
+    }
+  }
+
+  // Step2: 残りをスペース・区切り文字で分割してノーマル・レアの単体判定
+  for (const part of remaining.split(/[\s\/／・\n,、]+/)) {
     const t = part.trim();
     if (!t) continue;
-    for (const { pattern, code } of RARITY_PATTERNS) {
-      if (pattern.test(t)) {
-        if (!results.includes(code)) results.push(code);
-        break;
-      }
-    }
+    if (/^(ノーマル|N|Normal)$/i.test(t) && !results.includes('N')) results.push('N');
+    else if (/^(レア|R|Rare)$/i.test(t) && !results.includes('R')) results.push('R');
   }
 
   return results.length > 0 ? results : ['N'];
@@ -116,7 +118,7 @@ function parseFromTables(html: string): RawEntry[] {
       if (thMatches.length > 0) {
         thMatches.forEach((th, i) => {
           const t = stripTags(th[1]);
-          if (/カード番号|番号/.test(t)) cardIdCol = i;
+          if (/カード番号|番号|収録/.test(t)) cardIdCol = i;
           else if (/カード名/.test(t)) nameCol = i;
           else if (/レアリティ/.test(t)) rarityCol = i;
         });
