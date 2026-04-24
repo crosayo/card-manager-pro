@@ -24,7 +24,7 @@ function extractAnchorText(cellHtml: string): string {
   return decodeEntities(m[1].replace(/<[^>]+>/g, '').trim());
 }
 
-const CARD_ID_RE = /\b([A-Z]+-JP\d{3,4})\b/;
+const CARD_ID_RE = /\b([A-Z][A-Z0-9]*-JP\d{3,4})\b/;
 
 interface RawEntry {
   cardId: string;
