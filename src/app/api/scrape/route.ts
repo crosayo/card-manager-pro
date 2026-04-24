@@ -10,6 +10,7 @@ function decodeEntities(str: string): string {
     .replace(/&gt;/g, '>')
     .replace(/&nbsp;/g, ' ')
     .replace(/&quot;/g, '"')
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
 }
 
@@ -18,8 +19,10 @@ function stripTags(html: string): string {
 }
 
 function extractAnchorText(cellHtml: string): string {
-  const m = cellHtml.match(/<a[^>]*>([^<]+)<\/a>/);
-  return m ? decodeEntities(m[1].trim()) : '';
+  const m = cellHtml.match(/<a[^>]*>([\s\S]*?)<\/a>/);
+  if (!m) return '';
+  // アンカー内のHTMLタグ（<span>等）を除去してテキストのみ取得
+  return decodeEntities(m[1].replace(/<[^>]+>/g, '').trim());
 }
 
 const CARD_ID_RE = /\b([A-Z]+-JP\d{3,4})\b/;
@@ -183,7 +186,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Failed to fetch URL: ${fetchResponse.statusText}` }, { status: 500 });
     }
 
-    const html = await fetchResponse.text();
+    // yugioh-wiki.net はEUC-JPのため、ArrayBufferで取得してデコード
+    const buffer = await fetchResponse.arrayBuffer();
+    const contentType = fetchResponse.headers.get('content-type') || '';
+    const charsetMatch = contentType.match(/charset=([\w-]+)/i);
+    const charset = charsetMatch ? charsetMatch[1].toLowerCase() : 'euc-jp';
+    const html = new TextDecoder(charset).decode(buffer);
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
     // Step 1: HTMLから型番・名前を直接抽出
@@ -197,7 +205,7 @@ export async function POST(req: NextRequest) {
       console.warn('HTMLパース結果0件。Geminiフルパースにフォールバック。');
       const truncatedHtml = html.substring(0, 500000);
       const fallbackResponse = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-2.0-flash',
         contents: `
 以下のHTMLからカードリストを抽出してください。
 カード名・型番は原文のまま抽出し省略・推測しないこと。
@@ -231,7 +239,7 @@ HTML: ${truncatedHtml}
     const rarityInput = rawEntries.map((e, i) => `${i}|${e.cardId}|${e.rawRarity}`).join('\n');
 
     const rarityResponse = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.0-flash',
       contents: `
 遊戯王カードのレアリティ情報を正規化してください。
 型番・名前は変更せず、レアリティの正規化のみ行うこと。
@@ -270,19 +278,20 @@ ${rarityInput}
       JSON.parse(rarityResponse.text || "[]");
 
     // Step 4: HTMLパース結果(名前・型番)とGeminiレアリティを結合
-    const items = rarityResults
-      .map(r => {
-        const entry = rawEntries[r.idx];
-        if (!entry) return null;
-        return {
-          name: entry.name,
-          cardId: entry.cardId,
-          rarity: r.rarity || 'N',
-          stock: 0,
-          category: category || entry.cardId.split('-')[0]
-        };
-      })
-      .filter(Boolean);
+    // Geminiが返したidxをマップ化し、返さなかった行はデフォルト'N'で補完
+    const rarityMap = new Map<number, string>();
+    for (const r of rarityResults) {
+      if (r.idx >= 0 && r.idx < rawEntries.length) {
+        rarityMap.set(r.idx, r.rarity || 'N');
+      }
+    }
+    const items = rawEntries.map((entry, idx) => ({
+      name: entry.name,
+      cardId: entry.cardId,
+      rarity: rarityMap.get(idx) ?? 'N',
+      stock: 0,
+      category: category || entry.cardId.split('-')[0]
+    }));
 
     return NextResponse.json({ items });
 
