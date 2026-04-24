@@ -1,6 +1,5 @@
 
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenAI, Type } from "@google/genai";
 
 // ── HTML ユーティリティ ──────────────────────────────────────────
 function decodeEntities(str: string): string {
@@ -40,6 +39,40 @@ function execAll(str: string, pattern: RegExp): RegExpExecArray[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(str)) !== null) results.push(m);
   return results;
+}
+
+// ── レアリティ正規化（Gemini不要・固定マッピング） ───────────────
+// 長い名称から先にマッチさせること（「シークレット」が「スーパーシークレット」等を誤検知しないよう）
+const RARITY_PATTERNS: Array<{ pattern: RegExp; code: string }> = [
+  { pattern: /クォーターセンチュリーシークレット|quarter.?century.?secret|25th.?se/i, code: '25thSE' },
+  { pattern: /プリズマティックシークレット|prismatic.?secret/i,                        code: 'PS' },
+  { pattern: /アルティメットレア|ultimate.?rare/i,                                     code: 'UL' },
+  { pattern: /シークレットレア|secret.?rare/i,                                         code: 'SE' },
+  { pattern: /ウルトラレア|ultra.?rare/i,                                              code: 'UR' },
+  { pattern: /スーパーレア|super.?rare/i,                                              code: 'SR' },
+  { pattern: /ノーマルパラレル|normal.?parallel/i,                                     code: 'NP' },
+  { pattern: /ノーマルレア|normal.?rare/i,                                             code: 'NR' },
+  { pattern: /ノーマル|^n$|^normal$/i,                                                 code: 'N' },
+  { pattern: /^レア$|^r$|^rare$/i,                                                     code: 'R' },
+];
+
+function normalizeRarity(rawRarity: string): string[] {
+  // スラッシュ・改行・全角スラッシュ・中点等で分割
+  const parts = rawRarity.split(/[\/／・\n,、]/);
+  const results: string[] = [];
+
+  for (const part of parts) {
+    const t = part.trim();
+    if (!t) continue;
+    for (const { pattern, code } of RARITY_PATTERNS) {
+      if (pattern.test(t)) {
+        if (!results.includes(code)) results.push(code);
+        break;
+      }
+    }
+  }
+
+  return results.length > 0 ? results : ['N'];
 }
 
 // ── テーブルパーサー ─────────────────────────────────────────────
@@ -192,7 +225,6 @@ export async function POST(req: NextRequest) {
     const charsetMatch = contentType.match(/charset=([\w-]+)/i);
     const charset = charsetMatch ? charsetMatch[1].toLowerCase() : 'euc-jp';
     const html = new TextDecoder(charset).decode(buffer);
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
     // Step 1: HTMLから型番・名前を直接抽出
     let rawEntries = parseFromTables(html);
@@ -200,98 +232,25 @@ export async function POST(req: NextRequest) {
 
     const category = extractCategory(html);
 
-    // Step 2: HTML解析失敗時はGeminiフルパースにフォールバック
     if (rawEntries.length === 0) {
-      console.warn('HTMLパース結果0件。Geminiフルパースにフォールバック。');
-      const truncatedHtml = html.substring(0, 500000);
-      const fallbackResponse = await ai.models.generateContent({
-        model: 'gemini-2.0-flash-lite',
-        contents: `
-以下のHTMLからカードリストを抽出してください。
-カード名・型番は原文のまま抽出し省略・推測しないこと。
-レアリティ略称: UR/SR/R/N/SE/25thSE/UL/PS
-1行に複数レアリティがある場合は別オブジェクトとして分割。
-HTML: ${truncatedHtml}
-        `,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING },
-                cardId: { type: Type.STRING },
-                rarity: { type: Type.STRING },
-                stock: { type: Type.INTEGER },
-                category: { type: Type.STRING }
-              }
-            }
-          }
-        }
-      });
-      const items = JSON.parse(fallbackResponse.text || "[]");
-      return NextResponse.json({ items });
+      return NextResponse.json(
+        { error: 'カードリストが見つかりませんでした。URLを確認してください。' },
+        { status: 422 }
+      );
     }
 
-    // Step 3: Geminiはレアリティの正規化・分割のみ担当
-    // 入力は「行番号|型番|レアリティ原文」形式で圧縮して送信
-    const rarityInput = rawEntries.map((e, i) => `${i}|${e.cardId}|${e.rawRarity}`).join('\n');
-
-    const rarityResponse = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-lite',
-      contents: `
-遊戯王カードのレアリティ情報を正規化してください。
-型番・名前は変更せず、レアリティの正規化のみ行うこと。
-1エントリに複数レアリティがある場合は別オブジェクトに分割すること。
-
-レアリティ対応表:
-ウルトラレア / Ultra Rare → UR
-スーパーレア / Super Rare → SR
-レア / Rare → R
-ノーマル / Normal → N
-シークレットレア / Secret Rare → SE
-クォーターセンチュリーシークレットレア / 25th Secret → 25thSE
-アルティメットレア / Ultimate Rare → UL
-プリズマティックシークレットレア / Prismatic Secret → PS
-判断不能 → N
-
-入力(行番号|型番|レアリティ原文):
-${rarityInput}
-      `,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              idx: { type: Type.INTEGER },
-              rarity: { type: Type.STRING }
-            }
-          }
-        }
-      }
+    // Step 2: レアリティ正規化（固定マッピングで処理・Gemini不要）
+    // 複数レアリティがある行は別オブジェクトに展開
+    const items = rawEntries.flatMap(entry => {
+      const rarities = normalizeRarity(entry.rawRarity);
+      return rarities.map(rarity => ({
+        name: entry.name,
+        cardId: entry.cardId,
+        rarity,
+        stock: 0,
+        category: category || entry.cardId.split('-')[0]
+      }));
     });
-
-    const rarityResults: Array<{ idx: number; rarity: string }> =
-      JSON.parse(rarityResponse.text || "[]");
-
-    // Step 4: HTMLパース結果(名前・型番)とGeminiレアリティを結合
-    // Geminiが返したidxをマップ化し、返さなかった行はデフォルト'N'で補完
-    const rarityMap = new Map<number, string>();
-    for (const r of rarityResults) {
-      if (r.idx >= 0 && r.idx < rawEntries.length) {
-        rarityMap.set(r.idx, r.rarity || 'N');
-      }
-    }
-    const items = rawEntries.map((entry, idx) => ({
-      name: entry.name,
-      cardId: entry.cardId,
-      rarity: rarityMap.get(idx) ?? 'N',
-      stock: 0,
-      category: category || entry.cardId.split('-')[0]
-    }));
 
     return NextResponse.json({ items });
 
