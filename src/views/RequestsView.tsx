@@ -2,11 +2,12 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { ShoppingBag, Loader2, ChevronDown, ChevronRight, Check, X, Edit3, AlertCircle, Trash2 } from 'lucide-react';
-import { CardRequest, RequestItem, RequestEditLog } from '@/types';
+import { ShoppingBag, Loader2, ChevronDown, ChevronRight, Check, X, Edit3, AlertCircle, Trash2, RefreshCw } from 'lucide-react';
+import { CardRequest, Item, RequestItem, RequestEditLog } from '@/types';
 import { api } from '@/services/api';
 import { useAppContext } from '@/context/AppContext';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { RARITY_STYLES, RARITY_DEFAULT_STYLE } from '@/constants';
 
 const STATUS_LABELS: Record<CardRequest['status'], string> = {
   pending: '受付中',
@@ -25,8 +26,13 @@ const formatDate = (iso: string) => {
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
+const getRarityStyle = (rarity: string): string => {
+  const style = RARITY_STYLES[rarity] ?? RARITY_DEFAULT_STYLE;
+  return `${style.bg} ${style.text} border ${style.border}`;
+};
+
 export const RequestsView: React.FC = () => {
-  const { isAdmin, addToast } = useAppContext();
+  const { isAdmin, addToast, rarities } = useAppContext();
   const [requests, setRequests] = useState<CardRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<CardRequest['status'] | 'all'>('all');
@@ -38,6 +44,11 @@ export const RequestsView: React.FC = () => {
   const [nameError, setNameError] = useState('');
   const [editMessage, setEditMessage] = useState('');
   const [editQuantities, setEditQuantities] = useState<Record<number, number>>({});
+
+  // バリアント変更状態
+  const [swappingItemId, setSwappingItemId] = useState<number | null>(null);
+  const [swapAlternatives, setSwapAlternatives] = useState<Item[]>([]);
+  const [isLoadingSwap, setIsLoadingSwap] = useState(false);
 
   // 完了モーダル状態（管理者用）
   const [completingRequest, setCompletingRequest] = useState<CardRequest | null>(null);
@@ -104,6 +115,47 @@ export const RequestsView: React.FC = () => {
   const cancelEdit = () => {
     setEditingId(null);
     setNameError('');
+    setSwappingItemId(null);
+    setSwapAlternatives([]);
+  };
+
+  const openSwap = async (ri: RequestItem) => {
+    if (swappingItemId === ri.id) {
+      setSwappingItemId(null);
+      setSwapAlternatives([]);
+      return;
+    }
+    setSwappingItemId(ri.id);
+    setIsLoadingSwap(true);
+    try {
+      const all = await api.fetchItemsByName(ri.item!.name);
+      // 設定のレアリティ順でソート、現在のアイテムは除外
+      const rarityMap = new Map(rarities.map((r, i) => [r, i]));
+      const alts = all
+        .filter(a => a.id !== ri.itemId)
+        .sort((a, b) => {
+          if (a.cardId !== b.cardId) return a.cardId.localeCompare(b.cardId);
+          return (rarityMap.get(a.rarity) ?? 999) - (rarityMap.get(b.rarity) ?? 999);
+        });
+      setSwapAlternatives(alts);
+    } catch {
+      setSwapAlternatives([]);
+    } finally {
+      setIsLoadingSwap(false);
+    }
+  };
+
+  const doSwap = async (req: CardRequest, ri: RequestItem, newItem: Item) => {
+    try {
+      await api.swapRequestItem(ri.id, newItem.id);
+      const updated = await api.fetchRequestById(req.id);
+      setRequests(prev => prev.map(r => r.id === req.id ? updated : r));
+      setSwappingItemId(null);
+      setSwapAlternatives([]);
+      addToast('success', 'カード変更完了', `${newItem.rarity} / ${newItem.cardId} に変更しました。`);
+    } catch (e: any) {
+      addToast('error', '変更失敗', e.message);
+    }
   };
 
   const submitEdit = async (req: CardRequest) => {
@@ -314,13 +366,64 @@ export const RequestsView: React.FC = () => {
 
                     {/* 数量編集 */}
                     {req.items?.map(ri => (
-                      <div key={ri.id} className="flex items-center gap-3 text-sm">
-                        <span className="flex-1 text-slate-700">{ri.item?.name || ri.supply?.name || '不明'}</span>
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => setEditQuantities(prev => ({ ...prev, [ri.id]: Math.max(1, (prev[ri.id] ?? ri.quantity) - 1) }))} className="w-7 h-7 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center">-</button>
-                          <span className="w-8 text-center font-bold">{editQuantities[ri.id] ?? ri.quantity}</span>
-                          <button onClick={() => setEditQuantities(prev => ({ ...prev, [ri.id]: (prev[ri.id] ?? ri.quantity) + 1 }))} className="w-7 h-7 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center">+</button>
+                      <div key={ri.id} className="space-y-1">
+                        <div className="flex items-center gap-3 text-sm">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-slate-700 font-medium">{ri.item?.name || ri.supply?.name || '不明'}</div>
+                            {ri.item && (
+                              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                <span className="font-mono text-xs text-slate-400">{ri.item.cardId}</span>
+                                <span className={`px-1.5 py-0.5 rounded text-[11px] font-bold border ${getRarityStyle(ri.item.rarity)}`}>
+                                  {ri.item.rarity}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => openSwap(ri)}
+                                  className="text-[11px] text-cyan-500 hover:text-cyan-700 hover:underline flex items-center gap-0.5"
+                                >
+                                  <RefreshCw size={10} />
+                                  別バリアント
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button onClick={() => setEditQuantities(prev => ({ ...prev, [ri.id]: Math.max(1, (prev[ri.id] ?? ri.quantity) - 1) }))} className="w-7 h-7 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center">-</button>
+                            <span className="w-8 text-center font-bold">{editQuantities[ri.id] ?? ri.quantity}</span>
+                            <button onClick={() => setEditQuantities(prev => ({ ...prev, [ri.id]: (prev[ri.id] ?? ri.quantity) + 1 }))} className="w-7 h-7 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center">+</button>
+                          </div>
                         </div>
+
+                        {/* バリアント選択パネル */}
+                        {swappingItemId === ri.id && (
+                          <div className="ml-2 p-2 bg-cyan-50 border border-cyan-200 rounded-lg text-xs">
+                            {isLoadingSwap ? (
+                              <div className="flex items-center gap-1 text-slate-400 py-1">
+                                <Loader2 size={12} className="animate-spin" /> 読み込み中...
+                              </div>
+                            ) : swapAlternatives.length === 0 ? (
+                              <p className="text-slate-400 py-1">他のバリアントはありません</p>
+                            ) : (
+                              <div className="space-y-1">
+                                <p className="text-slate-500 mb-1.5 font-bold">変更先を選択:</p>
+                                {swapAlternatives.map(alt => (
+                                  <button
+                                    key={alt.id}
+                                    type="button"
+                                    onClick={() => doSwap(req, ri, alt)}
+                                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white border border-transparent hover:border-cyan-300 transition-colors text-left"
+                                  >
+                                    <span className={`px-1.5 py-0.5 rounded font-bold border ${getRarityStyle(alt.rarity)}`}>
+                                      {alt.rarity}
+                                    </span>
+                                    <span className="font-mono text-slate-500">{alt.cardId}</span>
+                                    <span className="text-slate-400 ml-auto">在庫: {alt.stock}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
 
@@ -348,11 +451,21 @@ export const RequestsView: React.FC = () => {
                   </div>
                 ) : (
                   <>
-                    <div className="space-y-1 mb-3">
+                    <div className="space-y-2 mb-3">
                       {req.items?.map(ri => (
-                        <div key={ri.id} className="flex justify-between text-sm text-slate-700">
-                          <span>{ri.item?.name || ri.supply?.name || '不明'}</span>
-                          <span className="font-bold text-slate-600">{ri.quantity}枚{ri.unitPrice ? ` (¥${ri.unitPrice.toLocaleString()})` : ''}</span>
+                        <div key={ri.id} className="flex justify-between items-start text-sm text-slate-700 gap-2">
+                          <div className="flex flex-col gap-0.5 min-w-0">
+                            <span className="font-medium">{ri.item?.name || ri.supply?.name || '不明'}</span>
+                            {ri.item && (
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-mono text-xs text-slate-400">{ri.item.cardId}</span>
+                                <span className={`px-1.5 py-0.5 rounded text-[11px] font-bold border ${getRarityStyle(ri.item.rarity)}`}>
+                                  {ri.item.rarity}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          <span className="font-bold text-slate-600 shrink-0">{ri.quantity}枚{ri.unitPrice ? ` (¥${ri.unitPrice.toLocaleString()})` : ''}</span>
                         </div>
                       ))}
                     </div>
@@ -469,7 +582,17 @@ export const RequestsView: React.FC = () => {
               <div className="space-y-2">
                 {completingRequest.items?.map(ri => (
                   <div key={ri.id} className="flex items-center gap-3">
-                    <span className="flex-1 text-sm text-slate-700">{ri.item?.name || ri.supply?.name || '不明'} ×{ri.quantity}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-slate-700">{ri.item?.name || ri.supply?.name || '不明'} ×{ri.quantity}</div>
+                      {ri.item && (
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="font-mono text-xs text-slate-400">{ri.item.cardId}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[11px] font-bold border ${getRarityStyle(ri.item.rarity)}`}>
+                            {ri.item.rarity}
+                          </span>
+                        </div>
+                      )}
+                    </div>
                     <div className="flex items-center gap-1">
                       <span className="text-sm text-slate-500">¥</span>
                       <input

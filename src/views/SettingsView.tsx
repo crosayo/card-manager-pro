@@ -176,7 +176,8 @@ CREATE OR REPLACE FUNCTION public.fetch_items_by_release_date(
   p_category text DEFAULT NULL,
   p_search text DEFAULT NULL,
   p_rarities text[] DEFAULT NULL,
-  p_show_zero_stock boolean DEFAULT true
+  p_show_zero_stock boolean DEFAULT true,
+  p_rarity_order text[] DEFAULT NULL
 )
 RETURNS json
 LANGUAGE plpgsql
@@ -218,7 +219,7 @@ BEGIN
       CASE WHEN v_sort_asc THEN COALESCE(p.release_date, '1999-01-01') END ASC,
       CASE WHEN NOT v_sort_asc THEN COALESCE(p.release_date, '1999-01-01') END DESC,
       i.card_id ASC,
-      i.rarity ASC
+      COALESCE(array_position(p_rarity_order, i.rarity), 999) ASC
     LIMIT p_page_size OFFSET v_offset
   ) t;
 

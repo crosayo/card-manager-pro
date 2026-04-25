@@ -197,7 +197,7 @@ export const api = {
   fetchItems: async (
     page: number = 1,
     pageSize: number = 50,
-    filters?: { category?: string | null, search?: string, showZeroStock?: boolean, rarities?: string[] },
+    filters?: { category?: string | null, search?: string, showZeroStock?: boolean, rarities?: string[], rarityOrder?: string[] },
     sort?: SortConfig
   ): Promise<PaginatedItems> => {
     ensureConnection();
@@ -213,6 +213,7 @@ export const api = {
           p_search:          filters?.search ? getSearchTerm(filters.search) : null,
           p_rarities:        (filters?.rarities && filters.rarities.length > 0) ? filters.rarities : null,
           p_show_zero_stock: filters?.showZeroStock !== false,
+          p_rarity_order:    (filters?.rarityOrder && filters.rarityOrder.length > 0) ? filters.rarityOrder : null,
         });
         if (error) {
           // RPC未登録の場合はフォールバック
@@ -1110,6 +1111,31 @@ export const api = {
     const slicedData = itemsWithDate.slice(from, from + pageSize).map(({ releaseDate, ...item }) => item);
 
     return { data: slicedData, count: itemsWithDate.length };
+  },
+
+  // カード名で全バリアントを取得（別レアリティ/型番選択用）
+  fetchItemsByName: async (name: string): Promise<Item[]> => {
+    ensureConnection();
+    const { data, error } = await supabase
+      .from('items')
+      .select('*')
+      .eq('name', name)
+      .order('card_id', { ascending: true });
+    if (error) {
+      if (error.code === '42P01') return [];
+      handleSupabaseError(error, 'fetchItemsByName');
+    }
+    return (data || []).map(mapDbItemToAppItem);
+  },
+
+  // リクエストアイテムのカードを別バリアントに差し替え（名前確認不要）
+  swapRequestItem: async (requestItemId: number, newItemId: number): Promise<void> => {
+    ensureConnection();
+    const { error } = await supabase
+      .from('request_items')
+      .update({ item_id: newItemId })
+      .eq('id', requestItemId);
+    if (error) handleSupabaseError(error, 'swapRequestItem');
   },
 
   fetchPendingRequestsCount: async (): Promise<number> => {

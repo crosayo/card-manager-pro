@@ -50,6 +50,7 @@ function InventoryPageContent() {
             search: searchKeyword,
             showZeroStock: !showOnlyInStock,
             rarities: selectedRarities.length > 0 ? selectedRarities : undefined,
+            rarityOrder: rarities.length > 0 ? rarities : undefined,
           },
           sortConfig
         );
