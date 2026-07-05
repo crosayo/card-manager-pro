@@ -1,12 +1,15 @@
 
 /**
- * 文字列を正規化し、不要な記号を削除します。
+ * 保存用に文字列を正規化し、不要な記号を削除します。
  * 1. NFKC正規化（全角英数字・記号 → 半角）
- * 2. ひらがな → カタカナ変換
- * 3. 遊戯王カード名に使われる記号類の除去
- * 4. 前後の空白除去
+ * 2. 遊戯王カード名に使われる記号類の除去
+ * 3. 前後の空白除去
+ *
+ * カード名の表記（ひらがな/カタカナ）は変更しない。DBに保存する値の生成には
+ * 必ずこちらを使うこと（ひらがな→カタカナ変換を含む normalizeCardName を
+ * 保存経路で使うと、意図せず名前の表記が書き換わってしまう）。
  */
-export function normalizeCardName(text: string): string {
+export function normalizeForStorage(text: string): string {
   if (!text) return '';
 
   let result = text;
@@ -14,16 +17,29 @@ export function normalizeCardName(text: string): string {
   // 1. NFKC正規化（全角英数字・記号 → 半角）
   result = result.normalize('NFKC');
 
-  // 2. ひらがな → カタカナ変換
-  result = result.replace(/[\u3041-\u3096]/g, (ch) =>
-    String.fromCharCode(ch.charCodeAt(0) + 0x60)
-  );
-
-  // 3. 記号の除去（遊戯王カード名に使われる記号類）
+  // 2. 記号の除去（遊戯王カード名に使われる記号類）
   result = result.replace(/[《》「」『』【】・＝―〈〉〔〕［］｛｝、。!！?？～〜･]/g, '');
 
-  // 4. 前後の空白除去
+  // 3. 前後の空白除去
   result = result.trim();
+
+  return result;
+}
+
+/**
+ * 検索・比較用に文字列を正規化します。保存用正規化に加えてひらがな→カタカナ
+ * 変換を行い、表記ゆれ（ひらがな/カタカナ）を吸収します。検索・重複判定など
+ * 「比較にのみ使う」用途で使用し、保存する値の生成には使わないこと。
+ */
+export function normalizeCardName(text: string): string {
+  if (!text) return '';
+
+  let result = normalizeForStorage(text);
+
+  // ひらがな → カタカナ変換
+  result = result.replace(/[ぁ-ゖ]/g, (ch) =>
+    String.fromCharCode(ch.charCodeAt(0) + 0x60)
+  );
 
   return result;
 }

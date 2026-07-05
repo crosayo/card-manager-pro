@@ -2,7 +2,7 @@
 import { supabase, isSupabaseEnabled } from '../lib/supabase';
 import { Item, Product, PaginatedItems, SortConfig, Season, News, SystemInfo, StockLog, CardRequest, RequestItem, RequestEditLog, Supply } from '../types';
 import { INITIAL_RARITIES, INITIAL_SEASONS, INITIAL_SYSTEM_INFO } from '../constants';
-import { normalizeCardName, getSearchTerm } from '../utils';
+import { normalizeCardName, normalizeForStorage, getSearchTerm } from '../utils';
 
 // DBのマッピング
 const mapDbItemToAppItem = (dbItem: any): Item => ({
@@ -326,8 +326,8 @@ export const api = {
     ensureConnection();
     // 追加時に正規化とサニタイズを適用
     const payload: any = {
-        name: normalizeCardName(newItem.name),
-        card_id: normalizeCardName(newItem.cardId), // 型番も正規化（半角統一）
+        name: normalizeForStorage(newItem.name),
+        card_id: normalizeForStorage(newItem.cardId), // 型番も正規化（半角統一）
         rarity: newItem.rarity,
         stock: newItem.stock,
         category: newItem.category,
@@ -380,8 +380,8 @@ export const api = {
       updated_at: new Date().toISOString()
     };
     // 更新時も正規化
-    if (updates.name !== undefined) dbUpdates.name = normalizeCardName(updates.name);
-    if (updates.cardId !== undefined) dbUpdates.card_id = normalizeCardName(updates.cardId);
+    if (updates.name !== undefined) dbUpdates.name = normalizeForStorage(updates.name);
+    if (updates.cardId !== undefined) dbUpdates.card_id = normalizeForStorage(updates.cardId);
     if (updates.rarity !== undefined) dbUpdates.rarity = updates.rarity;
     if (updates.stock !== undefined) dbUpdates.stock = updates.stock;
     if (updates.category !== undefined) dbUpdates.category = updates.category;
@@ -431,8 +431,8 @@ export const api = {
     // DBのカラム名に変換 & 正規化
     const normalizedItems = items.map(item => ({
       id: item.id, // バックアップからの復元時はIDを維持
-      name: normalizeCardName(item.name),
-      card_id: normalizeCardName(item.card_id || item.cardId),
+      name: normalizeForStorage(item.name),
+      card_id: normalizeForStorage(item.card_id || item.cardId),
       rarity: item.rarity,
       stock: item.stock,
       category: item.category,
@@ -489,8 +489,8 @@ export const api = {
     const updates = [];
 
     for (const item of allItems) {
-      const normalizedName = normalizeCardName(item.name);
-      const normalizedCardId = normalizeCardName(item.cardId);
+      const normalizedName = normalizeForStorage(item.name);
+      const normalizedCardId = normalizeForStorage(item.cardId);
 
       // 変化がある場合のみ更新対象にする
       if (normalizedName !== item.name || normalizedCardId !== item.cardId) {

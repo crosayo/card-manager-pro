@@ -2,7 +2,8 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Eye, EyeOff, Search, Plus, Loader2, Filter, ArrowUpDown, Edit3, Trash2, X, Save, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, ExternalLink, Upload, ChevronsLeft, ChevronsRight, Calendar, ChevronDown, ShoppingCart, Check } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Eye, EyeOff, Search, Plus, Loader2, Filter, ArrowUpDown, Edit3, Trash2, X, Save, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, ExternalLink, Upload, ChevronsLeft, ChevronsRight, Calendar, ChevronDown, ShoppingCart, Check, Copy } from 'lucide-react';
 import { Item, News, Product, SortConfig, AppError, ToastType } from '@/types';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/services/api';
@@ -60,6 +61,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
   pendingQuantities = {},
 }) => {
   const { rarities, selectedRarities, setSelectedRarities, showOnlyInStock, setShowOnlyInStock } = useAppContext();
+  const router = useRouter();
   const { cartItems, addToCart } = useCart();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
@@ -87,6 +89,11 @@ export const InventoryList: React.FC<InventoryListProps> = ({
     category: selectedCategory || products[0]?.name || '',
   });
 
+  // 登録モーダル内: 既存カード検索（別カテゴリへの別レアリティ追加用）
+  const [cardSearchKeyword, setCardSearchKeyword] = useState('');
+  const [cardSearchResults, setCardSearchResults] = useState<Item[]>([]);
+  const [isCardSearching, setIsCardSearching] = useState(false);
+
   const totalPages = Math.ceil(totalCount / pageSize);
 
   const getRarityStyle = (rarity: string): string => {
@@ -100,6 +107,8 @@ export const InventoryList: React.FC<InventoryListProps> = ({
 
   const openAddModal = () => {
     setEditingItem(null);
+    setCardSearchKeyword('');
+    setCardSearchResults([]);
     setFormData({
       name: '',
       cardId: '',
@@ -108,6 +117,38 @@ export const InventoryList: React.FC<InventoryListProps> = ({
       category: selectedCategory || products[0]?.name || '',
     });
     setIsModalOpen(true);
+  };
+
+  // 登録モーダル内の既存カード検索（デバウンス付き）
+  useEffect(() => {
+    if (!isModalOpen || editingItem || !cardSearchKeyword.trim()) {
+      setCardSearchResults([]);
+      return;
+    }
+    setIsCardSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const result = await api.fetchItems(1, 8, { search: cardSearchKeyword });
+        setCardSearchResults(result.data);
+      } catch {
+        setCardSearchResults([]);
+      } finally {
+        setIsCardSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [cardSearchKeyword, isModalOpen, editingItem]);
+
+  // 検索候補を選んでフォームに反映（別カテゴリへの別レアリティ追加を想定）
+  const selectSearchedCard = (item: Item) => {
+    setFormData(prev => ({
+      ...prev,
+      name: item.name,
+      cardId: item.cardId,
+      category: item.category,
+    }));
+    setCardSearchKeyword('');
+    setCardSearchResults([]);
   };
 
   const openEditModal = (item: Item, e?: React.MouseEvent) => {
@@ -121,6 +162,25 @@ export const InventoryList: React.FC<InventoryListProps> = ({
       cardId: item.cardId,
       rarity: item.rarity,
       stock: item.stock,
+      category: item.category,
+    });
+    setIsModalOpen(true);
+  };
+
+  // 別レアリティ追加用: 既存カードの内容を引き継いで新規登録モーダルを開く
+  const openDuplicateModal = (item: Item, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    setEditingItem(null);
+    setCardSearchKeyword('');
+    setCardSearchResults([]);
+    setFormData({
+      name: item.name,
+      cardId: item.cardId,
+      rarity: rarities.find(r => r !== item.rarity) || rarities[0] || 'N',
+      stock: 0,
       category: item.category,
     });
     setIsModalOpen(true);
@@ -183,19 +243,31 @@ export const InventoryList: React.FC<InventoryListProps> = ({
       try {
         const text = event.target?.result as string;
         const rows = text.split('\n').filter(row => row.trim() !== '');
-        
+
+        // ヘッダー行から「ID」「在庫数」の列位置を特定する（列の並び順が変わっても壊れないように）
+        const headerCols = rows[0]
+          ?.replace(/^﻿/, '')
+          .split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/)
+          .map(h => h.replace(/"/g, '').trim()) || [];
+        const idColIndex = headerCols.indexOf('ID');
+        const stockColIndex = headerCols.indexOf('在庫数');
+
+        if (idColIndex === -1 || stockColIndex === -1) {
+          throw new Error('ヘッダー行に「ID」「在庫数」列が見つかりませんでした。CSVの形式を確認してください。');
+        }
+
         const updates: { id: number, stock: number }[] = [];
         let successCount = 0;
         let failCount = 0;
 
         for (let i = 1; i < rows.length; i++) {
           const cols = rows[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/); // カンマ区切り（引用符内を無視）
-          
-          if (cols.length < 5) continue;
+
+          if (cols.length <= Math.max(idColIndex, stockColIndex)) continue;
 
           // CSVのエスケープ処理: ダブルクォート削除
-          const idStr = cols[0]?.replace(/"/g, '').trim();
-          const stockStr = cols[4]?.replace(/"/g, '').trim();
+          const idStr = cols[idColIndex]?.replace(/"/g, '').trim();
+          const stockStr = cols[stockColIndex]?.replace(/"/g, '').trim();
 
           if (idStr && stockStr) {
             const id = parseInt(idStr);
@@ -498,9 +570,12 @@ export const InventoryList: React.FC<InventoryListProps> = ({
           <div className="flex flex-wrap gap-2 items-center pt-2 border-t border-slate-100">
             <Filter size={14} className="text-slate-400 shrink-0" />
             {selectedCategory && (
-              <span className="flex items-center gap-1 bg-cyan-100 text-cyan-800 border border-cyan-200 px-2 py-1 rounded-full text-xs font-bold">
-                {selectedCategory}
-              </span>
+              <button
+                onClick={() => router.push('/inventory')}
+                className="flex items-center gap-1 bg-cyan-100 text-cyan-800 border border-cyan-200 px-2 py-1 rounded-full text-xs font-bold hover:opacity-80 transition-opacity"
+              >
+                {selectedCategory} <X size={10} />
+              </button>
             )}
             {selectedRarities.map(r => {
               const style = RARITY_STYLES[r] ?? RARITY_DEFAULT_STYLE;
@@ -672,6 +747,14 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
                             type="button"
+                            onClick={(e) => openDuplicateModal(item, e)}
+                            className="bg-slate-100 hover:bg-green-100 text-slate-400 hover:text-green-600 p-2 rounded transition-colors"
+                            title="複製して別レアリティ追加"
+                          >
+                            <Copy size={18} />
+                          </button>
+                          <button
+                            type="button"
                             onClick={(e) => openEditModal(item, e)}
                             className="bg-slate-100 hover:bg-cyan-100 text-slate-400 hover:text-cyan-600 p-2 rounded transition-colors"
                             title="編集"
@@ -807,14 +890,21 @@ export const InventoryList: React.FC<InventoryListProps> = ({
               
                {isAdmin && (
                  <div className="mt-3 flex justify-end gap-2 pt-2 border-t border-slate-50 border-dashed">
-                   <button 
+                   <button
+                     onClick={(e) => openDuplicateModal(item, e)}
+                     className="flex-1 py-2 text-sm text-slate-500 hover:text-green-600 hover:bg-slate-50 rounded flex items-center justify-center gap-1 active:bg-slate-100"
+                   >
+                     <Copy size={16} /> 複製
+                   </button>
+                   <div className="w-px bg-slate-200 my-1"></div>
+                   <button
                      onClick={(e) => openEditModal(item, e)}
                      className="flex-1 py-2 text-sm text-slate-500 hover:text-cyan-600 hover:bg-slate-50 rounded flex items-center justify-center gap-1 active:bg-slate-100"
                    >
                      <Edit3 size={16} /> 編集
                    </button>
                    <div className="w-px bg-slate-200 my-1"></div>
-                   <button 
+                   <button
                      onClick={(e) => handleDeleteClick(item.id, item.name, e)}
                      className="flex-1 py-2 text-sm text-slate-500 hover:text-red-600 hover:bg-red-50 rounded flex items-center justify-center gap-1 active:bg-red-100"
                    >
@@ -908,6 +998,44 @@ export const InventoryList: React.FC<InventoryListProps> = ({
               </button>
             </div>
             
+            {!editingItem && (
+              <div className="px-6 pt-4">
+                <label className="block text-sm font-bold text-slate-700 mb-1">既存カードから呼び出し（別カテゴリへの別レアリティ追加に便利）</label>
+                <div className="relative">
+                  <div className="flex items-center gap-2 bg-slate-100 px-3 py-2 rounded-lg focus-within:ring-2 focus-within:ring-cyan-400 transition-all">
+                    <Search size={16} className="text-slate-400 shrink-0" />
+                    <input
+                      type="text"
+                      placeholder="カード名・型番で検索..."
+                      className="bg-transparent border-none outline-none w-full text-sm text-slate-700 placeholder-slate-400"
+                      value={cardSearchKeyword}
+                      onChange={(e) => setCardSearchKeyword(e.target.value)}
+                    />
+                    {isCardSearching && <Loader2 size={14} className="animate-spin text-slate-400 shrink-0" />}
+                  </div>
+                  {cardSearchResults.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-10 max-h-56 overflow-y-auto">
+                      {cardSearchResults.map(result => (
+                        <button
+                          type="button"
+                          key={result.id}
+                          onClick={() => selectSearchedCard(result)}
+                          className="w-full text-left px-3 py-2 hover:bg-cyan-50 border-b border-slate-50 last:border-b-0"
+                        >
+                          <div className="font-bold text-sm text-slate-800">{result.name}</div>
+                          <div className="text-xs text-slate-400 flex items-center gap-2">
+                            <span className="font-mono">{result.cardId}</span>
+                            <span>{result.rarity}</span>
+                            <span>{result.category}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">

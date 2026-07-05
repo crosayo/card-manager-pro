@@ -6,7 +6,7 @@ import { Download, Zap, RefreshCw, Check, Loader2, Save, Trash2, Copy, Plus, Dat
 import { AppError, ToastType, Item } from '../types';
 import { api } from '../services/api';
 import { useAppContext } from '../context/AppContext';
-import { normalizeCardName } from '../utils';
+import { normalizeCardName, normalizeForStorage } from '../utils';
 
 interface ScraperViewProps {
   isLoading: boolean;
@@ -88,8 +88,8 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
     }
 
     return data.items.map((item: any) => ({
-      name: normalizeCardName(item.name || ''),
-      cardId: normalizeCardName(item.cardId || ''),
+      name: normalizeForStorage(item.name || ''),
+      cardId: normalizeForStorage(item.cardId || ''),
       rarity: item.rarity || 'N',
       stock: item.stock || 0,
       category: item.category || '',
@@ -242,8 +242,8 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
       // 1. 安全なアイテムの新規登録
       for (const item of safes) {
         await api.addItem({
-            name: normalizeCardName(item.name),
-            cardId: normalizeCardName(item.cardId),
+            name: normalizeForStorage(item.name),
+            cardId: normalizeForStorage(item.cardId),
             rarity: item.rarity,
             stock: item.stock,
             category: categoryName
@@ -263,9 +263,10 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
           }
         } else if (conf.resolution === 'overwrite') {
           // 上書き (名前やカテゴリ情報の更新)
+          // 注意: Wiki解析結果のstockは常に0のため、在庫数は更新対象に含めない
+          // （含めると実在庫が0にリセットされてしまう）
           await api.updateItem(conf.existingItem.id, {
-            name: normalizeCardName(conf.newItem.name),
-            stock: conf.newItem.stock, // 在庫もWikiの値で上書き
+            name: normalizeForStorage(conf.newItem.name),
             category: categoryName // カテゴリも選択中のパックに更新
           });
           count++;
@@ -377,12 +378,12 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto pb-24">
       <h2 className="text-2xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-        <Download /> Wiki取込 (Gemini Powered)
+        <Download /> Wiki取込
       </h2>
-      
+
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8">
         <div className="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6 text-sm text-blue-800">
-           <div className="font-bold mb-1 flex items-center gap-2"><Zap size={16}/> Gemini 3 Flash</div>
+           <div className="font-bold mb-1 flex items-center gap-2"><Zap size={16}/> 自動解析</div>
            <p>WikiのURLからカードリストを解析します。解析後は下部のリストで直接編集が可能です。</p>
         </div>
 

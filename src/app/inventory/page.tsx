@@ -114,7 +114,13 @@ function InventoryPageContent() {
 
     try {
       const updatedItem = await api.updateStock(id, totalDelta);
-      setItems(prev => prev.map(item => item.id === id ? updatedItem : item));
+      // この応答を待つ間にさらにクリックされ、次のバッチが積み上がっている場合は
+      // その分を加算してから反映する（そうしないと応答適用時に一瞬値が巻き戻る）
+      setItems(prev => prev.map(item => {
+        if (item.id !== id) return item;
+        const stillPending = pendingDeltaRef.current.get(id) ?? 0;
+        return { ...updatedItem, stock: Math.max(0, updatedItem.stock + stillPending) };
+      }));
       // ログ記録（失敗しても無視）
       api.addStockLog({ itemId: id, delta: totalDelta, stockAfter: updatedItem.stock, source: 'manual' }).catch(() => {});
     } catch (e: any) {

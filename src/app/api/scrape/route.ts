@@ -43,15 +43,17 @@ function execAll(str: string, pattern: RegExp): RegExpExecArray[] {
 
 // ── レアリティ正規化（Gemini不要・固定マッピング） ───────────────
 // 複合レアリティを先にスキャンして除去し、残りでノーマル・レアを判定する
+// 「○○ Rare」の「Rare」を省略した英語表記（例: 単に "Ultra" "Secret"）も
+// wiki上でよく使われるため、\bによる単語単位マッチも併記して拾う
 const COMPOUND_RARITY_PATTERNS: Array<{ pattern: RegExp; code: string }> = [
   { pattern: /クォーターセンチュリーシークレットレア|quarter.?century.?secret|25th.?se/gi, code: '25thSE' },
   { pattern: /プリズマティックシークレットレア|prismatic.?secret/gi,                        code: 'PS' },
-  { pattern: /アルティメットレア|ultimate.?rare/gi,                                        code: 'UL' },
-  { pattern: /シークレットレア|secret.?rare/gi,                                            code: 'SE' },
-  { pattern: /ウルトラレア|ultra.?rare/gi,                                                 code: 'UR' },
-  { pattern: /スーパーレア|super.?rare/gi,                                                 code: 'SR' },
-  { pattern: /ノーマルパラレル|normal.?parallel/gi,                                        code: 'NP' },
-  { pattern: /ノーマルレア|normal.?rare/gi,                                                code: 'NR' },
+  { pattern: /アルティメットレア|ultimate.?rare|\bultimate\b/gi,                            code: 'UL' },
+  { pattern: /シークレットレア|secret.?rare|\bsecret\b/gi,                                  code: 'SE' },
+  { pattern: /ウルトラレア|ultra.?rare|\bultra\b/gi,                                        code: 'UR' },
+  { pattern: /スーパーレア|super.?rare|\bsuper\b/gi,                                        code: 'SR' },
+  { pattern: /ノーマルパラレル|normal.?parallel|N-Parallel/gi,                              code: 'NP' },
+  { pattern: /ノーマルレア|normal.?rare/gi,                                                 code: 'NR' },
 ];
 
 function normalizeRarity(rawRarity: string): string[] {
@@ -75,6 +77,20 @@ function normalizeRarity(rawRarity: string): string[] {
   }
 
   return results.length > 0 ? results : ['N'];
+}
+
+// ── 本文領域抽出 ─────────────────────────────────────────────────
+// PukiWikiはメニューバー(id="menubar")にも過去記事へのリンク等が並んでおり、
+// そこにカード型番らしき文字列が偶然含まれるとテーブル解析が誤検出するため、
+// 本文コンテナ(id="body")〜フッター(id="footer")の間だけを解析対象にする
+function extractMainContent(html: string): string {
+  const bodyIdx = html.indexOf('id="body"');
+  if (bodyIdx === -1) return html;
+  const bodyDivStart = html.lastIndexOf('<div', bodyIdx);
+  const footerIdx = html.indexOf('id="footer"', bodyDivStart);
+  if (footerIdx === -1) return html.substring(bodyDivStart);
+  const footerDivStart = html.lastIndexOf('<div', footerIdx);
+  return html.substring(bodyDivStart, footerDivStart);
 }
 
 // ── テーブルパーサー ─────────────────────────────────────────────
@@ -228,9 +244,10 @@ export async function POST(req: NextRequest) {
     const charset = charsetMatch ? charsetMatch[1].toLowerCase() : 'euc-jp';
     const html = new TextDecoder(charset).decode(buffer);
 
-    // Step 1: HTMLから型番・名前を直接抽出
-    let rawEntries = parseFromTables(html);
-    if (rawEntries.length === 0) rawEntries = parseFromLists(html);
+    // Step 1: HTMLから型番・名前を直接抽出（本文領域のみを対象にする）
+    const mainContent = extractMainContent(html);
+    let rawEntries = parseFromTables(mainContent);
+    if (rawEntries.length === 0) rawEntries = parseFromLists(mainContent);
 
     const category = extractCategory(html);
 
