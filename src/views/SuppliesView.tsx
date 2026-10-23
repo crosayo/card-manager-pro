@@ -108,7 +108,12 @@ export const SuppliesView: React.FC = () => {
 
     try {
       const updated = await api.updateSupplyStock(id, totalDelta);
-      setSupplies(prev => prev.map(s => s.id === id ? updated : s));
+      // 応答待ちの間に積み上がったクリック分を加算して反映する（表示の巻き戻り防止）
+      setSupplies(prev => prev.map(s => {
+        if (s.id !== id) return s;
+        const stillPending = pendingDeltaRef.current.get(id) ?? 0;
+        return { ...updated, stock: Math.max(0, updated.stock + stillPending) };
+      }));
       api.addStockLog({ supplyId: id, delta: totalDelta, stockAfter: updated.stock, source: 'manual' }).catch(() => {});
     } catch (e: any) {
       addToast('error', '在庫更新失敗', e.message);

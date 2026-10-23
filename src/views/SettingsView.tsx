@@ -167,67 +167,147 @@ begin
 end;
 $$;
 
--- 10. RPC関数 (発売日順ソート + サーバー側ページネーション)
+revoke execute on function public.increment_stock(bigint, integer) from public, anon;
+grant execute on function public.increment_stock(bigint, integer) to authenticated;
+
+-- 10. 検索用の正規化関数と検索キー列
+-- NFKC正規化 → 空白・記号の除去 → ひらがな→カタカナ → 小文字化
+-- ※ src/utils.ts の toSearchKey と同じ規則にすること
+create or replace function public.normalize_search(p text)
+returns text
+language sql
+immutable
+parallel safe
+as $$
+  select lower(
+    translate(
+      regexp_replace(
+        normalize(coalesce(p, ''), NFKC),
+        '[[:space:]\\x21-\\x2f\\x3a-\\x40\\x5b-\\x60\\x7b-\\x7e《》「」『』【】・〈〉〔〕［］｛｝、。～〜―‐–—−･·☆★♪♡〝〟…]',
+        '',
+        'g'
+      ),
+      'ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんゔゕゖ',
+      'ァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴヵヶ'
+    )
+  );
+$$;
+
+-- カード名・型番・収録パックを正規化して連結した検索キー（行の追加・更新時に自動計算）
+-- ※ normalize_search の規則を変更した場合は「update public.items set name = name;」で再計算すること
+alter table public.items add column if not exists search_key text
+  generated always as (
+    public.normalize_search(name) || '|' ||
+    public.normalize_search(card_id) || '|' ||
+    public.normalize_search(category)
+  ) stored;
+
+-- 11. RPC関数 (検索 + 絞り込み + ソート + サーバー側ページネーション)
+-- 検索ワードは空白区切りのAND検索。表記ゆれは search_key で吸収する
 -- ※ api.ts の呼び出しパラメータと一致させること
-CREATE OR REPLACE FUNCTION public.fetch_items_by_release_date(
+CREATE OR REPLACE FUNCTION public.search_items(
+  p_search text DEFAULT NULL,
+  p_category text DEFAULT NULL,
+  p_rarities text[] DEFAULT NULL,
+  p_show_zero_stock boolean DEFAULT true,
+  p_sort_key text DEFAULT NULL,
   p_direction text DEFAULT 'desc',
   p_page integer DEFAULT 1,
   p_page_size integer DEFAULT 50,
-  p_category text DEFAULT NULL,
-  p_search text DEFAULT NULL,
-  p_rarities text[] DEFAULT NULL,
-  p_show_zero_stock boolean DEFAULT true,
   p_rarity_order text[] DEFAULT NULL
 )
 RETURNS json
 LANGUAGE plpgsql
-SECURITY DEFINER
+STABLE
 AS $$
 DECLARE
-  v_offset integer;
-  v_total integer;
-  v_items json;
-  v_sort_asc boolean;
+  v_tokens text[];
+  v_asc boolean := (p_direction = 'asc');
+  v_result json;
 BEGIN
-  v_sort_asc := (p_direction = 'asc');
-  v_offset := (p_page - 1) * p_page_size;
+  v_tokens := ARRAY(
+    SELECT k FROM (
+      SELECT public.normalize_search(t) AS k
+      FROM regexp_split_to_table(normalize(coalesce(p_search, ''), NFKC), '[[:space:]]+') AS t
+    ) s
+    WHERE k <> ''
+  );
 
-  SELECT count(*) INTO v_total
-  FROM public.items i
-  LEFT JOIN public.products p ON i.category = p.name
-  WHERE (p_category IS NULL OR i.category = p_category)
-    AND (p_search IS NULL OR
-         i.name ILIKE '%' || p_search || '%' OR
-         i.card_id ILIKE '%' || p_search || '%' OR
-         i.category ILIKE '%' || p_search || '%')
-    AND (p_show_zero_stock OR i.stock > 0)
-    AND (p_rarities IS NULL OR i.rarity = ANY(p_rarities));
-
-  SELECT json_agg(t) INTO v_items
-  FROM (
-    SELECT i.id, i.name, i.card_id, i.rarity, i.stock, i.category, i.updated_at
+  WITH filtered AS (
+    SELECT i.id, i.name, i.card_id, i.rarity, i.stock, i.category, i.updated_at,
+           COALESCE(p.release_date, '1999-01-01') AS release_date,
+           COALESCE(array_position(p_rarity_order, i.rarity), 999) AS rarity_rank
     FROM public.items i
     LEFT JOIN public.products p ON i.category = p.name
     WHERE (p_category IS NULL OR i.category = p_category)
-      AND (p_search IS NULL OR
-           i.name ILIKE '%' || p_search || '%' OR
-           i.card_id ILIKE '%' || p_search || '%' OR
-           i.category ILIKE '%' || p_search || '%')
       AND (p_show_zero_stock OR i.stock > 0)
       AND (p_rarities IS NULL OR i.rarity = ANY(p_rarities))
-    ORDER BY
-      CASE WHEN v_sort_asc THEN COALESCE(p.release_date, '1999-01-01') END ASC,
-      CASE WHEN NOT v_sort_asc THEN COALESCE(p.release_date, '1999-01-01') END DESC,
-      i.card_id ASC,
-      COALESCE(array_position(p_rarity_order, i.rarity), 999) ASC
-    LIMIT p_page_size OFFSET v_offset
-  ) t;
+      AND NOT EXISTS (
+        SELECT 1 FROM unnest(v_tokens) AS tok
+        WHERE strpos(i.search_key, tok) = 0
+      )
+  ),
+  ranked AS (
+    SELECT f.*, row_number() OVER (ORDER BY
+      CASE WHEN p_sort_key = 'releaseDate' AND v_asc     THEN f.release_date END ASC,
+      CASE WHEN p_sort_key = 'releaseDate' AND NOT v_asc THEN f.release_date END DESC,
+      CASE WHEN p_sort_key = 'cardId'      AND v_asc     THEN f.card_id END ASC,
+      CASE WHEN p_sort_key = 'cardId'      AND NOT v_asc THEN f.card_id END DESC,
+      CASE WHEN p_sort_key = 'name'        AND v_asc     THEN f.name END ASC,
+      CASE WHEN p_sort_key = 'name'        AND NOT v_asc THEN f.name END DESC,
+      CASE WHEN p_sort_key = 'rarity'      AND v_asc     THEN f.rarity_rank END ASC,
+      CASE WHEN p_sort_key = 'rarity'      AND NOT v_asc THEN f.rarity_rank END DESC,
+      CASE WHEN p_sort_key = 'rarity'      AND v_asc     THEN f.rarity END ASC,
+      CASE WHEN p_sort_key = 'rarity'      AND NOT v_asc THEN f.rarity END DESC,
+      CASE WHEN p_sort_key = 'category'    AND v_asc     THEN f.category END ASC,
+      CASE WHEN p_sort_key = 'category'    AND NOT v_asc THEN f.category END DESC,
+      CASE WHEN p_sort_key = 'stock'       AND v_asc     THEN f.stock END ASC,
+      CASE WHEN p_sort_key = 'stock'       AND NOT v_asc THEN f.stock END DESC,
+      CASE WHEN p_sort_key = 'updatedAt'   AND v_asc     THEN f.updated_at END ASC,
+      CASE WHEN p_sort_key = 'updatedAt'   AND NOT v_asc THEN f.updated_at END DESC,
+      CASE WHEN p_sort_key IS NULL THEN f.id END DESC,
+      f.card_id ASC,
+      f.rarity_rank ASC,
+      f.id ASC
+    ) AS rn
+    FROM filtered f
+  )
+  SELECT json_build_object(
+    'data', COALESCE((
+      SELECT json_agg(json_build_object(
+        'id', r.id, 'name', r.name, 'card_id', r.card_id, 'rarity', r.rarity,
+        'stock', r.stock, 'category', r.category, 'updated_at', r.updated_at
+      ) ORDER BY r.rn)
+      FROM ranked r
+      WHERE r.rn > (p_page - 1) * p_page_size AND r.rn <= p_page * p_page_size
+    ), '[]'::json),
+    'count', (SELECT count(*) FROM filtered)
+  ) INTO v_result;
 
-  RETURN json_build_object(
-    'data', COALESCE(v_items, '[]'::json),
-    'count', v_total
-  );
+  RETURN v_result;
 END;
+$$;
+
+-- 12. RPC関数 (サプライ在庫安全更新: 連打・同時操作でもずれない)
+-- security invoker のため supplies テーブルのRLSがそのまま適用される
+create or replace function public.increment_supply_stock(p_supply_id bigint, p_delta integer)
+returns json
+language plpgsql
+as $$
+declare
+  v_row json;
+begin
+  update public.supplies s
+  set stock = greatest(0, s.stock + p_delta)
+  where s.id = p_supply_id
+  returning to_json(s.*) into v_row;
+
+  if v_row is null then
+    raise exception 'Supply not found or permission denied';
+  end if;
+
+  return v_row;
+end;
 $$;
 `;
 

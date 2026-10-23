@@ -44,12 +44,36 @@ export function normalizeCardName(text: string): string {
   return result;
 }
 
+// 検索キーから取り除く文字（空白・ASCII記号・カード名に使われる全角記号類）
+// ※ DB関数 public.normalize_search（SettingsView の SQL）と同じ規則にすること
+const SEARCH_STRIP_PATTERN = /[\s\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e《》「」『』【】・〈〉〔〕［］｛｝、。～〜―‐–—−･·☆★♪♡〝〟…]/g;
+
 /**
- * 検索用に正規化されたテキストを取得します。
+ * 検索照合用のキーを生成します（DB関数 public.normalize_search と同じ処理）。
+ * NFKC正規化 → 空白・記号の除去 → ひらがな→カタカナ → 小文字化
+ * 表記ゆれ（全角/半角・ひらがな/カタカナ・記号や空白の有無・大文字/小文字）を吸収する。
  */
-export const getSearchTerm = (text: string): string => {
-  return normalizeCardName(text);
-};
+export function toSearchKey(text: string): string {
+  if (!text) return '';
+  return text
+    .normalize('NFKC')
+    .replace(SEARCH_STRIP_PATTERN, '')
+    .replace(/[ぁ-ゖ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) + 0x60))
+    .toLowerCase();
+}
+
+/**
+ * 検索ワードを空白で区切り、それぞれを検索キーに変換します（AND検索用）。
+ * 記号のみの語など、変換後に空になる語は除外する。
+ */
+export function toSearchTokens(text: string): string[] {
+  if (!text) return [];
+  return text
+    .normalize('NFKC')
+    .split(/\s+/)
+    .map(toSearchKey)
+    .filter(Boolean);
+}
 
 /**
  * 画像ファイルをリサイズ・圧縮します（ブラウザ専用）。

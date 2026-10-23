@@ -2,7 +2,9 @@
 import { supabase, isSupabaseEnabled } from '../lib/supabase';
 import { Item, Product, PaginatedItems, SortConfig, Season, News, SystemInfo, StockLog, CardRequest, RequestItem, RequestEditLog, Supply } from '../types';
 import { INITIAL_RARITIES, INITIAL_SEASONS, INITIAL_SYSTEM_INFO } from '../constants';
-import { normalizeCardName, normalizeForStorage, getSearchTerm } from '../utils';
+import { normalizeForStorage, toSearchKey, toSearchTokens } from '../utils';
+
+type ItemFilters = { category?: string | null, search?: string, showZeroStock?: boolean, rarities?: string[], rarityOrder?: string[] };
 
 // DBのマッピング
 const mapDbItemToAppItem = (dbItem: any): Item => ({
@@ -101,6 +103,21 @@ const handleSupabaseError = (error: any, action: string) => {
   throw err;
 };
 
+// RPC関数が未登録かどうか（42883: PostgreSQL側 / PGRST202: PostgRESTのスキーマキャッシュ上に無い）
+const isMissingFunction = (error: any) => error?.code === '42883' || error?.code === 'PGRST202';
+
+// 複数件の更新結果から失敗分をまとめて1つのエラーにする
+const throwIfAnyFailed = (results: { error: any }[], action: string) => {
+  const failed = results.filter(r => r.error);
+  if (failed.length === 0) return;
+  console.error(`Supabase Error [${action}]:`, failed.map(r => r.error));
+  const err: any = new Error(`${action}: ${results.length}件中${failed.length}件の更新に失敗しました。(${failed[0].error.message})`);
+  err.code = failed[0].error.code || 'PARTIAL_FAILURE';
+  throw err;
+};
+
+let warnedMissingSearchRpc = false;
+
 const ensureConnection = () => {
   if (!isSupabaseEnabled || !supabase) {
     const e: any = new Error("データベース接続設定が見つかりません。");
@@ -194,110 +211,51 @@ export const api = {
   },
 
   // --- Items (Smart Pagination) ---
+  // 検索・絞り込み・ソート・ページネーションはすべてDB関数 search_items で行う。
+  // 検索ワードは空白区切りのAND検索で、表記ゆれ（全角/半角・ひらがな/カタカナ・
+  // 記号や空白の有無・大文字/小文字）はDB側の search_key 列で吸収する。
   fetchItems: async (
     page: number = 1,
     pageSize: number = 50,
-    filters?: { category?: string | null, search?: string, showZeroStock?: boolean, rarities?: string[], rarityOrder?: string[] },
+    filters?: ItemFilters,
     sort?: SortConfig
   ): Promise<PaginatedItems> => {
     ensureConnection();
 
-    // 発売日順ソート: RPC関数でサーバー側ソート+ページネーション
-    if (sort?.key === 'releaseDate') {
-      try {
-        const { data: rpcResult, error } = await supabase.rpc('fetch_items_by_release_date', {
-          p_direction:       sort.direction,
-          p_page:            page,
-          p_page_size:       pageSize,
-          p_category:        filters?.category ?? null,
-          p_search:          filters?.search ? getSearchTerm(filters.search) : null,
-          p_rarities:        (filters?.rarities && filters.rarities.length > 0) ? filters.rarities : null,
-          p_show_zero_stock: filters?.showZeroStock !== false,
-          p_rarity_order:    (filters?.rarityOrder && filters.rarityOrder.length > 0) ? filters.rarityOrder : null,
-        });
-        if (error) {
-          // RPC未登録の場合はフォールバック
-          if (error.code === '42883') return api._fallbackReleaseDateSort(page, pageSize, filters, sort);
-          handleSupabaseError(error, 'fetchItems(RPC:fetch_items_by_release_date)');
-        }
-        return {
-          data:  ((rpcResult as any)?.data  || []).map(mapDbItemToAppItem),
-          count: (rpcResult  as any)?.count || 0,
-        };
-      } catch {
-        return api._fallbackReleaseDateSort(page, pageSize, filters, sort);
-      }
-    }
-    
-    // --- 通常のServer-side Query (高速) ---
-    let query = supabase.from('items').select('*', { count: 'exact' });
-
-    // Filters
-    if (filters?.category) {
-      query = query.eq('category', filters.category);
-    }
-    if (filters?.search) {
-      const normalized = getSearchTerm(filters.search);
-      const conditions: string[] = [];
-
-      // 正規化後のキーワードで検索（常に実行）
-      conditions.push(`name.ilike.%${normalized}%`);
-      conditions.push(`card_id.ilike.%${normalized}%`);
-      conditions.push(`category.ilike.%${normalized}%`);
-
-      // 元のキーワードと異なる場合は元のキーワードでも検索
-      if (normalized !== filters.search.trim()) {
-        conditions.push(`name.ilike.%${filters.search.trim()}%`);
-        conditions.push(`card_id.ilike.%${filters.search.trim()}%`);
-      }
-
-      query = query.or(conditions.join(','));
-    }
-    if (filters?.rarities && filters.rarities.length > 0) {
-      query = query.in('rarity', filters.rarities);
-    }
-    if (filters?.showZeroStock === false) {
-      query = query.gt('stock', 0);
-    }
-
-    // Sorting
-    if (sort) {
-      let dbKey = sort.key as string;
-      if (sort.key === 'cardId') dbKey = 'card_id';
-      if (sort.key === 'updatedAt') dbKey = 'updated_at';
-      
-      // releaseDateがここに来た場合（フォールバック）、updated_atで代用
-      if ((sort.key as string) === 'releaseDate') dbKey = 'updated_at';
-      
-      query = query.order(dbKey, { ascending: sort.direction === 'asc' });
-
-      if (dbKey !== 'card_id') {
-         query = query.order('card_id', { ascending: true });
-      }
-      query = query.order('id', { ascending: true });
-    } else {
-      query = query.order('id', { ascending: false });
-    }
-
-    // Pagination
-    const from = (page - 1) * pageSize;
-    const to = from + pageSize - 1;
-    
-    const { data, count, error } = await query.range(from, to);
+    const { data: rpcResult, error } = await supabase.rpc('search_items', {
+      p_search:          filters?.search?.trim() || null,
+      p_category:        filters?.category ?? null,
+      p_rarities:        (filters?.rarities && filters.rarities.length > 0) ? filters.rarities : null,
+      p_show_zero_stock: filters?.showZeroStock !== false,
+      p_sort_key:        sort?.key ?? null,
+      p_direction:       sort?.direction ?? 'desc',
+      p_page:            page,
+      p_page_size:       pageSize,
+      p_rarity_order:    (filters?.rarityOrder && filters.rarityOrder.length > 0) ? filters.rarityOrder : null,
+    });
 
     if (error) {
-       if (error.code === '42P01') return { data: [], count: 0 };
-       handleSupabaseError(error, 'fetchItems');
+      // SQL未適用の環境では全件取得してクライアント側で処理する（低速）
+      if (isMissingFunction(error) || error.code === '42703') {
+        if (!warnedMissingSearchRpc) {
+          console.warn("RPC 'search_items' が未登録です。設定画面のSQLを実行してください。クライアント側検索で代替します。");
+          warnedMissingSearchRpc = true;
+        }
+        return api._fallbackSearch(page, pageSize, filters, sort);
+      }
+      if (error.code === '42P01') return { data: [], count: 0 };
+      handleSupabaseError(error, 'fetchItems(RPC:search_items)');
     }
-    
+
     return {
-      data: (data || []).map(mapDbItemToAppItem),
-      count: count || 0
+      data:  ((rpcResult as any)?.data  || []).map(mapDbItemToAppItem),
+      count: (rpcResult  as any)?.count || 0,
     };
   },
 
   // 内部用: 全件取得ヘルパー
   fetchAllItemsInternal: async (): Promise<Item[]> => {
+    ensureConnection();
     let allItems: any[] = [];
     const PAGE_SIZE = 1000;
     let page = 0;
@@ -307,9 +265,10 @@ export const api = {
       const { data, error } = await supabase
         .from('items')
         .select('*')
+        .order('id', { ascending: true })
         .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 
-      if (error) throw error;
+      if (error) handleSupabaseError(error, 'fetchAllItemsInternal');
 
       if (data && data.length > 0) {
         allItems = [...allItems, ...data];
@@ -354,7 +313,7 @@ export const api = {
 
     if (error) {
       // RPCがない場合のフォールバック (ただし連打安全性は劣る)
-      if (error.code === '42883') { // Undefined function
+      if (isMissingFunction(error)) {
          console.warn("RPC 'increment_stock' not found. Falling back to simple update.");
          const { data: current } = await supabase.from('items').select('stock').eq('id', id).single();
          const newStock = Math.max(0, (current?.stock || 0) + delta);
@@ -462,20 +421,70 @@ export const api = {
     }
   },
 
-  bulkUpdateStock: async (updates: { id: number, stock: number }[]): Promise<void> => {
+  // CSV等からの在庫一括上書き。更新前の在庫を取得して増減数を算出し、
+  // 在庫が変わらない行は更新しない。結果を種類別に返す（呼び出し側でログ記録・表示に使う）
+  bulkUpdateStock: async (updates: { id: number, stock: number }[]): Promise<{
+    updated: { id: number, stock: number, delta: number }[];
+    unchanged: number;
+    notFound: number[];
+    failed: { id: number, message: string }[];
+  }> => {
     ensureConnection();
-    const BATCH_SIZE = 50; 
+    const FETCH_BATCH_SIZE = 200;
+    const BATCH_SIZE = 50;
     const timestamp = new Date().toISOString();
 
-    for (let i = 0; i < updates.length; i += BATCH_SIZE) {
-      const chunk = updates.slice(i, i + BATCH_SIZE);
-      await Promise.all(chunk.map(item => 
+    // 1. 更新前の在庫を取得
+    const currentStock = new Map<number, number>();
+    const ids = Array.from(new Set(updates.map(u => u.id)));
+    for (let i = 0; i < ids.length; i += FETCH_BATCH_SIZE) {
+      const chunk = ids.slice(i, i + FETCH_BATCH_SIZE);
+      const { data, error } = await supabase.from('items').select('id, stock').in('id', chunk);
+      if (error) handleSupabaseError(error, 'bulkUpdateStock(fetch)');
+      for (const row of (data || [])) currentStock.set(row.id, row.stock);
+    }
+
+    const result = {
+      updated: [] as { id: number, stock: number, delta: number }[],
+      unchanged: 0,
+      notFound: [] as number[],
+      failed: [] as { id: number, message: string }[],
+    };
+
+    const targets: { id: number, stock: number, delta: number }[] = [];
+    for (const u of updates) {
+      const before = currentStock.get(u.id);
+      if (before === undefined) { result.notFound.push(u.id); continue; }
+      if (before === u.stock) { result.unchanged++; continue; }
+      targets.push({ id: u.id, stock: u.stock, delta: u.stock - before });
+    }
+
+    // 2. 変更がある行だけ更新（.select() で実際に更新されたかを確認する）
+    for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+      const chunk = targets.slice(i, i + BATCH_SIZE);
+      const responses = await Promise.all(chunk.map(t =>
         supabase
           .from('items')
-          .update({ stock: item.stock, updated_at: timestamp })
-          .eq('id', item.id)
+          .update({ stock: t.stock, updated_at: timestamp })
+          .eq('id', t.id)
+          .select('id')
       ));
+      responses.forEach(({ data, error }: any, idx: number) => {
+        const t = chunk[idx];
+        if (error) {
+          result.failed.push({ id: t.id, message: error.message });
+        } else if (!data || data.length === 0) {
+          result.failed.push({ id: t.id, message: '権限がないか、対象が存在しません' });
+        } else {
+          result.updated.push(t);
+        }
+      });
     }
+
+    if (result.failed.length > 0) {
+      console.error('bulkUpdateStock: 更新に失敗した行', result.failed);
+    }
+    return result;
   },
 
   // --- Data Normalization Maintenance ---
@@ -504,15 +513,28 @@ export const api = {
     }
 
     // バッチ更新
+    let failedCount = 0;
+    let firstError: any = null;
     for (let i = 0; i < updates.length; i += BATCH_SIZE) {
       const chunk = updates.slice(i, i + BATCH_SIZE);
-      await Promise.all(chunk.map(u => 
+      const responses = await Promise.all(chunk.map(u =>
         supabase.from('items').update(u).eq('id', u.id)
       ));
-      updateCount += chunk.length;
+      for (const { error } of responses) {
+        if (error) {
+          failedCount++;
+          firstError = firstError ?? error;
+        } else {
+          updateCount++;
+        }
+      }
       if (onProgress) onProgress(updateCount);
     }
 
+    if (failedCount > 0) {
+      console.error('normalizeAllItems: 更新失敗', firstError);
+      throw new Error(`${updateCount}件を正規化しましたが、${failedCount}件の更新に失敗しました。(${firstError.message})`);
+    }
     return updateCount;
   },
 
@@ -806,11 +828,12 @@ export const api = {
 
     // 単価を更新
     if (params?.unitPrices) {
-      await Promise.all(
+      const results = await Promise.all(
         Object.entries(params.unitPrices).map(([riId, price]) =>
           supabase.from('request_items').update({ unit_price: price }).eq('id', Number(riId))
         )
       );
+      throwIfAnyFailed(results, 'updateRequestStatus(unitPrices)');
     }
 
     return api.fetchRequestById(requestId);
@@ -844,9 +867,10 @@ export const api = {
       if (error) handleSupabaseError(error, 'editRequest(message)');
     }
     if (params.itemChanges) {
-      await Promise.all(params.itemChanges.map(c =>
+      const results = await Promise.all(params.itemChanges.map(c =>
         supabase.from('request_items').update({ quantity: c.quantity }).eq('id', c.requestItemId)
       ));
+      throwIfAnyFailed(results, 'editRequest(itemChanges)');
     }
     if (params.itemsToAdd && params.itemsToAdd.length > 0) {
       const newItems = params.itemsToAdd.map(i => ({
@@ -994,12 +1018,24 @@ export const api = {
       .upload(fileName, compressed, { upsert: true, contentType: 'image/jpeg' });
     if (error) handleSupabaseError(error, 'uploadSupplyImage');
     const { data: urlData } = supabase.storage.from('supply-images').getPublicUrl(fileName);
-    await supabase.from('supplies').update({ image_url: urlData.publicUrl }).eq('id', supplyId);
+    const { error: updateError } = await supabase.from('supplies').update({ image_url: urlData.publicUrl }).eq('id', supplyId);
+    if (updateError) handleSupabaseError(updateError, 'uploadSupplyImage(update)');
     return urlData.publicUrl;
   },
 
   updateSupplyStock: async (id: number, delta: number): Promise<Supply> => {
     ensureConnection();
+
+    // 連打・同時操作でもずれないよう、DB側で「現在値 + delta」をアトミックに計算する
+    const { data: rpcData, error: rpcError } = await supabase.rpc('increment_supply_stock', {
+      p_supply_id: id,
+      p_delta: delta,
+    });
+    if (!rpcError) return mapDbSupplyToAppSupply(rpcData);
+    if (!isMissingFunction(rpcError)) handleSupabaseError(rpcError, 'updateSupplyStock(RPC)');
+
+    // RPC未登録時のフォールバック（同時操作時の安全性は劣る）
+    console.warn("RPC 'increment_supply_stock' not found. Falling back to simple update.");
     const { data: current, error: fetchError } = await supabase.from('supplies').select('stock').eq('id', id).single();
     if (fetchError) handleSupabaseError(fetchError, 'updateSupplyStock(fetch)');
     const newStock = Math.max(0, (current?.stock ?? 0) + delta);
@@ -1056,61 +1092,62 @@ export const api = {
     return !error || error.code !== '42P01';
   },
 
-  // フォールバック: RPC未登録時のクライアント側 releaseDate ソート（旧実装）
-  _fallbackReleaseDateSort: async (
+  // フォールバック: RPC search_items 未登録時のクライアント側検索・ソート
+  // （DB関数と同じ検索規則。全件取得するため件数が多いと遅い）
+  _fallbackSearch: async (
     page: number,
     pageSize: number,
-    filters?: { category?: string | null, search?: string, showZeroStock?: boolean, rarities?: string[] },
+    filters?: ItemFilters,
     sort?: SortConfig
   ): Promise<PaginatedItems> => {
     const products = await api.fetchProducts();
     const productMap = new Map(products.map(p => [p.name, p.releaseDate]));
-    const rarities = await api.fetchRarities();
-    const rarityMap = new Map(rarities.map((r, i) => [r, i]));
+    const rarityOrder = filters?.rarityOrder ?? await api.fetchRarities();
+    const rarityRank = (r: string) => { const i = rarityOrder.indexOf(r); return i === -1 ? 999 : i; };
     const allItems = await api.fetchAllItemsInternal();
 
-    let itemsWithDate = allItems.map(item => ({
-      ...item,
-      releaseDate: productMap.get(item.category) || '1999-01-01'
-    }));
-
+    let filtered = allItems;
     if (filters?.category) {
-      itemsWithDate = itemsWithDate.filter(i => i.category === filters.category);
+      filtered = filtered.filter(i => i.category === filters.category);
     }
-    if (filters?.search) {
-      const lowerRaw = filters.search.toLowerCase();
-      const lowerNormalized = getSearchTerm(filters.search).toLowerCase();
-      itemsWithDate = itemsWithDate.filter(i => {
-        const normName = normalizeCardName(i.name).toLowerCase();
-        const normCardId = normalizeCardName(i.cardId).toLowerCase();
-        const normCategory = normalizeCardName(i.category).toLowerCase();
-        return normName.includes(lowerNormalized) || normName.includes(lowerRaw) ||
-               normCardId.includes(lowerNormalized) || normCardId.includes(lowerRaw) ||
-               normCategory.includes(lowerNormalized) || normCategory.includes(lowerRaw);
+    const tokens = toSearchTokens(filters?.search ?? '');
+    if (tokens.length > 0) {
+      filtered = filtered.filter(i => {
+        const key = `${toSearchKey(i.name)}|${toSearchKey(i.cardId)}|${toSearchKey(i.category)}`;
+        return tokens.every(t => key.includes(t));
       });
     }
     if (filters?.rarities && filters.rarities.length > 0) {
-      itemsWithDate = itemsWithDate.filter(i => filters.rarities!.includes(i.rarity));
+      filtered = filtered.filter(i => filters.rarities!.includes(i.rarity));
     }
     if (filters?.showZeroStock === false) {
-      itemsWithDate = itemsWithDate.filter(i => i.stock > 0);
+      filtered = filtered.filter(i => i.stock > 0);
     }
 
-    const direction = sort?.direction || 'desc';
-    itemsWithDate.sort((a, b) => {
-      const dateA = new Date(a.releaseDate).getTime();
-      const dateB = new Date(b.releaseDate).getTime();
-      if (dateA !== dateB) return direction === 'asc' ? dateA - dateB : dateB - dateA;
-      if (a.cardId !== b.cardId) return a.cardId.localeCompare(b.cardId);
-      const rankA = rarityMap.get(a.rarity) ?? 999;
-      const rankB = rarityMap.get(b.rarity) ?? 999;
-      return rankA - rankB;
-    });
+    const sign = sort?.direction === 'asc' ? 1 : -1;
+    const cmp = (a: string | number, b: string | number) => (a < b ? -1 : a > b ? 1 : 0);
+    const primary = (a: Item, b: Item): number => {
+      switch (sort?.key) {
+        case 'releaseDate':
+          return cmp(productMap.get(a.category) || '1999-01-01', productMap.get(b.category) || '1999-01-01');
+        case 'cardId':    return cmp(a.cardId ?? '', b.cardId ?? '');
+        case 'name':      return cmp(a.name ?? '', b.name ?? '');
+        case 'rarity':    return cmp(rarityRank(a.rarity), rarityRank(b.rarity)) || cmp(a.rarity ?? '', b.rarity ?? '');
+        case 'category':  return cmp(a.category ?? '', b.category ?? '');
+        case 'stock':     return cmp(a.stock, b.stock);
+        case 'updatedAt': return cmp(a.updatedAt, b.updatedAt);
+        default:          return cmp(a.id, b.id); // ソート指定なし: 新しい順（sign=-1）
+      }
+    };
+    filtered = [...filtered].sort((a, b) =>
+      sign * primary(a, b) ||
+      cmp(a.cardId ?? '', b.cardId ?? '') ||
+      cmp(rarityRank(a.rarity), rarityRank(b.rarity)) ||
+      cmp(a.id, b.id)
+    );
 
     const from = (page - 1) * pageSize;
-    const slicedData = itemsWithDate.slice(from, from + pageSize).map(({ releaseDate, ...item }) => item);
-
-    return { data: slicedData, count: itemsWithDate.length };
+    return { data: filtered.slice(from, from + pageSize), count: filtered.length };
   },
 
   // カード名で全バリアントを取得（別レアリティ/型番選択用）

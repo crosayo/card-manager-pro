@@ -282,11 +282,30 @@ export const InventoryList: React.FC<InventoryListProps> = ({
         }
 
         if (updates.length > 0) {
-          await api.bulkUpdateStock(updates);
-          addToast('success', '在庫更新完了', `${updates.length}件の在庫を更新しました。ページをリロードして反映を確認してください。`);
-          // ログ記録（失敗しても無視）
-          Promise.all(updates.map(u =>
-            api.addStockLog({ itemId: u.id, delta: 0, stockAfter: u.stock, source: 'csv', note: 'CSVインポート' }).catch(() => {})
+          const result = await api.bulkUpdateStock(updates);
+          const summary = [
+            `更新 ${result.updated.length}件`,
+            `変更なし ${result.unchanged}件`,
+            result.notFound.length > 0 ? `該当IDなし ${result.notFound.length}件` : null,
+            failCount > 0 ? `CSVの値が不正 ${failCount}件` : null,
+          ].filter(Boolean).join(' / ');
+
+          if (result.failed.length > 0) {
+            addToast('error', '在庫更新で一部失敗', `${summary} / 失敗 ${result.failed.length}件`, {
+              code: 'CSV_PARTIAL_FAILURE',
+              message: `失敗したID: ${result.failed.map(f => f.id).join(', ')}`,
+              details: result.failed[0].message,
+              timestamp: new Date().toLocaleString(),
+            });
+          } else {
+            addToast('success', '在庫更新完了', `${summary}。ページをリロードして反映を確認してください。`);
+          }
+          if (result.notFound.length > 0) {
+            console.warn('CSVインポート: DBに存在しないID', result.notFound);
+          }
+          // ログ記録（実際に在庫が変わった行のみ・失敗しても無視）
+          Promise.all(result.updated.map(u =>
+            api.addStockLog({ itemId: u.id, delta: u.delta, stockAfter: u.stock, source: 'csv', note: 'CSVインポート' }).catch(() => {})
           ));
         } else {
           addToast('error', '更新データなし', '有効な更新データが見つかりませんでした。CSVの形式を確認してください。');
@@ -389,7 +408,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
             <Search size={20} className="text-slate-400 shrink-0" />
             <input 
               type="text" 
-              placeholder="カード名、型番で検索..." 
+              placeholder="カード名・型番・パック名で検索（空白区切りで絞り込み）"
               className="bg-transparent border-none outline-none w-full text-slate-700 placeholder-slate-400"
               value={searchKeyword}
               onChange={(e) => setSearchKeyword(e.target.value)}
@@ -697,7 +716,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                         </span>
                         {(pendingQuantities[item.id] ?? 0) > 0 && (
                           <div className="text-[10px] text-red-400 whitespace-nowrap">
-                            {pendingQuantities[item.id]}枚リクエスト中
+                            {pendingQuantities[item.id]}件リクエスト中
                           </div>
                         )}
                       </div>
@@ -837,7 +856,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                            {item.stock}
                          </span>
                          {(pendingQuantities[item.id] ?? 0) > 0 && (
-                           <div className="text-[10px] text-red-400">{pendingQuantities[item.id]}件申請中</div>
+                           <div className="text-[10px] text-red-400">{pendingQuantities[item.id]}件リクエスト中</div>
                          )}
                        </div>
                        <button
@@ -856,7 +875,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                             {item.stock}
                           </span>
                           {(pendingQuantities[item.id] ?? 0) > 0 && (
-                            <div className="text-[10px] text-red-400">{pendingQuantities[item.id]}件申請中</div>
+                            <div className="text-[10px] text-red-400">{pendingQuantities[item.id]}件リクエスト中</div>
                           )}
                         </div>
                      </div>
