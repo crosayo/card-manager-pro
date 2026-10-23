@@ -2,12 +2,14 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { ShoppingBag, Loader2, ChevronDown, ChevronRight, Check, X, Edit3, AlertCircle, Trash2, RefreshCw } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { ShoppingBag, Loader2, ChevronDown, ChevronRight, Check, X, Edit3, Trash2, RefreshCw, Link2, Info } from 'lucide-react';
 import { CardRequest, Item, RequestItem, RequestEditLog } from '@/types';
 import { api } from '@/services/api';
 import { useAppContext } from '@/context/AppContext';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { RARITY_STYLES, RARITY_DEFAULT_STYLE } from '@/constants';
+import { buildRequestEditUrl, getSavedRequestTokens, saveRequestToken } from '@/lib/requestTokens';
 
 const STATUS_LABELS: Record<CardRequest['status'], string> = {
   pending: '受付中',
@@ -33,15 +35,19 @@ const getRarityStyle = (rarity: string): string => {
 
 export const RequestsView: React.FC = () => {
   const { isAdmin, addToast, rarities } = useAppContext();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [requests, setRequests] = useState<CardRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<CardRequest['status'] | 'all'>('all');
   const [showAll, setShowAll] = useState(false);
 
+  // このブラウザで編集できるリクエスト（requestId -> 編集用トークン）
+  const [ownedTokens, setOwnedTokens] = useState<Record<number, string>>({});
+  const [highlightId, setHighlightId] = useState<number | null>(null);
+
   // 編集状態
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editNameInput, setEditNameInput] = useState('');
-  const [nameError, setNameError] = useState('');
   const [editMessage, setEditMessage] = useState('');
   const [editQuantities, setEditQuantities] = useState<Record<number, number>>({});
 
@@ -68,16 +74,61 @@ export const RequestsView: React.FC = () => {
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await api.fetchRequests();
+      const data = await api.fetchRequests(undefined, { includeToken: isAdmin });
       setRequests(data);
     } catch (e: any) {
       addToast('error', 'リクエスト取得失敗', e.message);
     } finally {
       setIsLoading(false);
     }
-  }, [addToast]);
+  }, [addToast, isAdmin]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => { setOwnedTokens(getSavedRequestTokens()); }, []);
+
+  // 編集用リンク（/requests?token=...）から開かれた場合: トークンを照合してこのブラウザに保存する
+  const tokenParam = searchParams.get('token');
+  useEffect(() => {
+    if (!tokenParam) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const requestId = await api.resolveRequestToken(tokenParam);
+        if (cancelled) return;
+        if (requestId === null) {
+          addToast('error', '編集用リンクが無効です', 'リンクが正しいか確認してください。');
+        } else {
+          saveRequestToken(requestId, tokenParam);
+          setOwnedTokens(getSavedRequestTokens());
+          setHighlightId(requestId);
+          setShowAll(true);
+          addToast('success', '編集できるようになりました', 'このブラウザで、あなたのリクエストを編集できます。');
+        }
+      } catch (e: any) {
+        if (!cancelled) addToast('error', '編集用リンクの確認に失敗しました', e.message);
+      } finally {
+        // トークンをアドレスバーや履歴に残さない
+        if (!cancelled) router.replace('/requests');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tokenParam, addToast, router]);
+
+  // 編集用リンクから開いたリクエストまでスクロール
+  useEffect(() => {
+    if (highlightId === null || isLoading) return;
+    document.getElementById(`request-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightId, isLoading]);
+
+  const copyEditLink = async (token: string) => {
+    try {
+      await navigator.clipboard.writeText(buildRequestEditUrl(token));
+      addToast('success', 'コピーしました', '編集用リンクをコピーしました。他の人には共有しないでください。');
+    } catch {
+      addToast('error', 'コピーできませんでした', 'ブラウザがクリップボードへのアクセスを許可していません。');
+    }
+  };
 
   const filtered = requests.filter(r => {
     if (isAdmin) {
@@ -103,9 +154,6 @@ export const RequestsView: React.FC = () => {
 
   const startEdit = (req: CardRequest) => {
     setEditingId(req.id);
-    // 管理者の場合は名前確認不要なので requesterName を自動設定
-    setEditNameInput(isAdmin ? req.requesterName : '');
-    setNameError('');
     setEditMessage(req.message || '');
     const qtys: Record<number, number> = {};
     req.items?.forEach(ri => { qtys[ri.id] = ri.quantity; });
@@ -114,7 +162,6 @@ export const RequestsView: React.FC = () => {
 
   const cancelEdit = () => {
     setEditingId(null);
-    setNameError('');
     setSwappingItemId(null);
     setSwapAlternatives([]);
   };
@@ -147,8 +194,13 @@ export const RequestsView: React.FC = () => {
 
   const doSwap = async (req: CardRequest, ri: RequestItem, newItem: Item) => {
     try {
-      await api.swapRequestItem(ri.id, newItem.id);
-      const updated = await api.fetchRequestById(req.id);
+      let updated: CardRequest;
+      if (isAdmin) {
+        await api.swapRequestItem(ri.id, newItem.id);
+        updated = await api.fetchRequestById(req.id, { includeToken: true });
+      } else {
+        updated = await api.swapRequestItemByToken(ownedTokens[req.id], ri.id, newItem.id);
+      }
       setRequests(prev => prev.map(r => r.id === req.id ? updated : r));
       setSwappingItemId(null);
       setSwapAlternatives([]);
@@ -168,31 +220,49 @@ export const RequestsView: React.FC = () => {
         })
         .map(([riId, qty]) => ({ requestItemId: Number(riId), quantity: qty }));
 
-      const updated = await api.editRequest(req.id, editNameInput, {
-        message: editMessage !== req.message ? editMessage : undefined,
+      const messageChanged = editMessage !== (req.message || '');
+      const params = {
+        message: messageChanged ? editMessage : undefined,
         itemChanges: itemChanges.length > 0 ? itemChanges : undefined,
-      });
+      };
 
-      // 変更があればログ記録
-      if (itemChanges.length > 0 || editMessage !== req.message) {
-        await api.addRequestEditLog({
-          requestId: req.id,
-          editorName: editNameInput,
-          fieldChanged: itemChanges.length > 0 ? '数量' : 'メモ',
-          oldValue: itemChanges.length > 0 ? '（変更前）' : req.message || '',
-          newValue: itemChanges.length > 0 ? '（変更後）' : editMessage,
-        });
+      let updated: CardRequest;
+      if (isAdmin) {
+        updated = await api.editRequestAsAdmin(req.id, params);
+        // 管理者の編集履歴はクライアントから記録（申請者の編集はDB関数内で記録される）
+        const itemName = (riId: number) => {
+          const ri = req.items?.find(x => x.id === riId);
+          return ri?.item?.name || ri?.supply?.name || '不明';
+        };
+        if (itemChanges.length > 0) {
+          await api.addRequestEditLog({
+            requestId: req.id,
+            editorName: '管理者',
+            fieldChanged: '数量',
+            oldValue: itemChanges.map(c => `${itemName(c.requestItemId)}: ${req.items?.find(x => x.id === c.requestItemId)?.quantity}枚`).join(', '),
+            newValue: itemChanges.map(c => `${itemName(c.requestItemId)}: ${c.quantity}枚`).join(', '),
+          });
+        }
+        if (messageChanged) {
+          await api.addRequestEditLog({
+            requestId: req.id,
+            editorName: '管理者',
+            fieldChanged: 'メモ',
+            oldValue: req.message || '',
+            newValue: editMessage,
+          });
+        }
+      } else {
+        updated = await api.editRequestByToken(ownedTokens[req.id], params);
       }
 
       setRequests(prev => prev.map(r => r.id === req.id ? updated : r));
+      setLogsCache(prev => { const next = { ...prev }; delete next[req.id]; return next; });
+      setExpandedLogs(prev => ({ ...prev, [req.id]: false }));
       setEditingId(null);
       addToast('success', '更新完了', 'リクエストを更新しました。');
     } catch (e: any) {
-      if (e.code === 'NAME_MISMATCH') {
-        setNameError(e.message);
-      } else {
-        addToast('error', '更新失敗', e.message);
-      }
+      addToast('error', '更新失敗', e.message);
     } finally {
       setIsUpdating(false);
     }
@@ -322,7 +392,14 @@ export const RequestsView: React.FC = () => {
           ))}
         </div>
       ) : (
-        <div className="mb-4">
+        <div className="mb-4 space-y-3">
+          <div className="bg-cyan-50 border border-cyan-200 rounded-lg px-4 py-3 text-xs text-cyan-800 flex gap-2">
+            <Info size={16} className="shrink-0 mt-0.5" />
+            <p>
+              リクエストを編集するには、送信完了時に表示された<b>編集用リンク</b>を開いてください。
+              送信したブラウザでは、そのまま「編集」ボタンから編集できます。
+            </p>
+          </div>
           <button
             onClick={() => setShowAll(!showAll)}
             className="text-sm text-cyan-600 hover:underline flex items-center gap-1"
@@ -345,7 +422,13 @@ export const RequestsView: React.FC = () => {
       ) : (
         <div className="space-y-4">
           {filtered.map(req => (
-            <div key={req.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div
+              key={req.id}
+              id={`request-${req.id}`}
+              className={`bg-white rounded-xl shadow-sm border overflow-hidden ${
+                highlightId === req.id ? 'border-cyan-400 ring-2 ring-cyan-300' : 'border-slate-200'
+              }`}
+            >
               {/* ヘッダー */}
               <div className="p-4 border-b border-slate-100 flex flex-wrap gap-3 justify-between items-center bg-slate-50">
                 <div className="flex items-center gap-3">
@@ -353,6 +436,11 @@ export const RequestsView: React.FC = () => {
                   <span className={`px-2 py-0.5 rounded text-xs font-bold border ${STATUS_STYLES[req.status]}`}>
                     {STATUS_LABELS[req.status]}
                   </span>
+                  {!isAdmin && ownedTokens[req.id] && (
+                    <span className="px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700 border border-amber-200">
+                      あなたのリクエスト
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs text-slate-400">{formatDate(req.createdAt)}</div>
               </div>
@@ -361,21 +449,6 @@ export const RequestsView: React.FC = () => {
               <div className="p-4">
                 {editingId === req.id ? (
                   <div className="space-y-3">
-                    {/* 名前確認（ゲストのみ表示） */}
-                    {!isAdmin && (
-                      <div>
-                        <label className="text-xs font-bold text-slate-600 mb-1 block">本人確認: お名前を入力してください</label>
-                        <input
-                          type="text"
-                          value={editNameInput}
-                          onChange={(e) => { setEditNameInput(e.target.value); setNameError(''); }}
-                          className={`w-full border rounded px-3 py-1.5 text-sm focus:ring-2 focus:ring-cyan-500 outline-none ${nameError ? 'border-red-400' : 'border-slate-300'}`}
-                          placeholder="送信時に入力したお名前"
-                        />
-                        {nameError && <p className="text-red-500 text-xs mt-1 flex items-center gap-1"><AlertCircle size={10} />{nameError}</p>}
-                      </div>
-                    )}
-
                     {/* 数量編集 */}
                     {req.items?.map(ri => (
                       <div key={ri.id} className="space-y-1">
@@ -453,7 +526,7 @@ export const RequestsView: React.FC = () => {
                       <button onClick={cancelEdit} className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded">キャンセル</button>
                       <button
                         onClick={() => submitEdit(req)}
-                        disabled={isUpdating || (!isAdmin && !editNameInput.trim())}
+                        disabled={isUpdating}
                         className="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded text-sm font-bold flex items-center gap-1 disabled:opacity-50"
                       >
                         {isUpdating ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
@@ -518,6 +591,11 @@ export const RequestsView: React.FC = () => {
                           <div key={log.id}>
                             <span className="text-slate-400">{formatDate(log.createdAt)}</span>
                             <span className="ml-2">{log.editorName}が「{log.fieldChanged}」を変更</span>
+                            {(log.oldValue || log.newValue) && (
+                              <div className="text-slate-400 pl-2">
+                                {log.oldValue || '（なし）'} → {log.newValue || '（なし）'}
+                              </div>
+                            )}
                           </div>
                         ))
                       )}
@@ -527,7 +605,7 @@ export const RequestsView: React.FC = () => {
               </div>
 
               {/* フッター操作ボタン */}
-              {(req.status === 'pending' || isAdmin) && (
+              {(isAdmin || (req.status === 'pending' && ownedTokens[req.id])) && (
                 <div className="px-4 py-3 border-t border-slate-100 bg-slate-50 flex gap-2 justify-end flex-wrap">
                   {/* 削除ボタン（管理者のみ、左寄せ） */}
                   {isAdmin && (
@@ -539,8 +617,19 @@ export const RequestsView: React.FC = () => {
                     </button>
                   )}
 
-                  {/* ゲストの編集ボタン */}
-                  {!isAdmin && req.status === 'pending' && editingId !== req.id && (
+                  {/* 編集用リンクのコピー（申請者: 別端末用 / 管理者: リンクを紛失した申請者への再送用） */}
+                  {req.status === 'pending' && (isAdmin ? req.token : ownedTokens[req.id]) && (
+                    <button
+                      onClick={() => copyEditLink((isAdmin ? req.token : ownedTokens[req.id])!)}
+                      className="px-3 py-1.5 text-sm text-cyan-700 hover:bg-cyan-50 border border-cyan-200 rounded flex items-center gap-1"
+                      title={isAdmin ? '申請者に送る編集用リンクをコピー' : '別の端末で編集するためのリンクをコピー'}
+                    >
+                      <Link2 size={14} /> 編集用リンクをコピー
+                    </button>
+                  )}
+
+                  {/* 申請者の編集ボタン（このブラウザに編集用トークンがある場合のみ） */}
+                  {!isAdmin && req.status === 'pending' && ownedTokens[req.id] && editingId !== req.id && (
                     <button
                       onClick={() => startEdit(req)}
                       className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-200 bg-slate-100 rounded flex items-center gap-1"

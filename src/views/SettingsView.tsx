@@ -323,6 +323,183 @@ begin
   return v_row;
 end;
 $$;
+
+-- 13. リクエストの編集用リンク（トークン）による本人確認
+-- 申請者の送信・編集・バリアント変更はすべて以下のDB関数経由で行い、トークンをDB側で照合する
+alter table public.requests add column if not exists token text default gen_random_uuid()::text;
+
+-- 13-1. リクエスト送信（本体と明細を一括登録し、編集用トークンを返す）
+create or replace function public.create_request(p_requester_name text, p_message text, p_items jsonb)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_request_id bigint;
+  v_token text;
+  v_item jsonb;
+  v_qty integer;
+begin
+  if coalesce(btrim(p_requester_name), '') = '' then
+    raise exception 'お名前を入力してください' using errcode = '22023';
+  end if;
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
+    raise exception 'リクエストするカードがありません' using errcode = '22023';
+  end if;
+
+  insert into public.requests (requester_name, message)
+  values (btrim(p_requester_name), nullif(btrim(coalesce(p_message, '')), ''))
+  returning id, token::text into v_request_id, v_token;
+
+  -- 既存の token 列にデフォルト値が無い環境向け
+  if v_token is null then
+    update public.requests set token = gen_random_uuid()
+    where id = v_request_id
+    returning token::text into v_token;
+  end if;
+
+  for v_item in select * from jsonb_array_elements(p_items) loop
+    v_qty := (v_item->>'quantity')::integer;
+    if v_qty is null or v_qty < 1 then
+      raise exception '枚数は1以上で指定してください' using errcode = '22023';
+    end if;
+    if v_item->>'item_id' is null and v_item->>'supply_id' is null then
+      raise exception 'リクエスト対象が指定されていません' using errcode = '22023';
+    end if;
+    insert into public.request_items (request_id, item_id, supply_id, quantity)
+    values (v_request_id, (v_item->>'item_id')::bigint, (v_item->>'supply_id')::bigint, v_qty);
+  end loop;
+
+  return json_build_object('id', v_request_id, 'token', v_token);
+end;
+$$;
+
+-- 13-2. 編集用リンクのトークンからリクエストIDを取得（無効なら null）
+create or replace function public.resolve_request_token(p_token text)
+returns bigint
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select id from public.requests where token::text = p_token limit 1;
+$$;
+
+-- 13-3. 申請者による編集（メモ・枚数）。編集履歴もここで記録する
+create or replace function public.edit_request_by_token(p_token text, p_message text default null, p_item_changes jsonb default null)
+returns bigint
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_req record;
+  v_change jsonb;
+  v_old record;
+  v_qty integer;
+  v_new_message text;
+begin
+  select id, requester_name, message, status into v_req
+  from public.requests where token::text = p_token
+  for update;
+  if not found then
+    raise exception '編集用リンクが無効です' using errcode = '42501';
+  end if;
+  if v_req.status <> 'pending' then
+    raise exception '受付中のリクエストのみ編集できます' using errcode = '22023';
+  end if;
+
+  if p_message is not null then
+    v_new_message := nullif(btrim(p_message), '');
+    if v_new_message is distinct from v_req.message then
+      update public.requests set message = v_new_message where id = v_req.id;
+      insert into public.request_edit_logs (request_id, editor_name, field_changed, old_value, new_value)
+      values (v_req.id, v_req.requester_name, 'メモ', v_req.message, v_new_message);
+    end if;
+  end if;
+
+  if p_item_changes is not null then
+    for v_change in select * from jsonb_array_elements(p_item_changes) loop
+      v_qty := (v_change->>'quantity')::integer;
+      if v_qty is null or v_qty < 1 then
+        raise exception '枚数は1以上で指定してください' using errcode = '22023';
+      end if;
+
+      select ri.id, ri.quantity, coalesce(i.name, s.name, '不明') as name into v_old
+      from public.request_items ri
+      left join public.items i on i.id = ri.item_id
+      left join public.supplies s on s.id = ri.supply_id
+      where ri.id = (v_change->>'request_item_id')::bigint and ri.request_id = v_req.id;
+      if not found then
+        raise exception '対象のカードがこのリクエストに見つかりません' using errcode = '22023';
+      end if;
+
+      if v_old.quantity <> v_qty then
+        update public.request_items set quantity = v_qty where id = v_old.id;
+        insert into public.request_edit_logs (request_id, editor_name, field_changed, old_value, new_value)
+        values (v_req.id, v_req.requester_name, '数量',
+                v_old.name || ': ' || v_old.quantity || '枚', v_old.name || ': ' || v_qty || '枚');
+      end if;
+    end loop;
+  end if;
+
+  return v_req.id;
+end;
+$$;
+
+-- 13-4. 申請者によるバリアント変更（同名カードの別型番・別レアリティへの差し替えのみ）
+create or replace function public.swap_request_item_by_token(p_token text, p_request_item_id bigint, p_new_item_id bigint)
+returns bigint
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_req record;
+  v_old record;
+  v_new record;
+begin
+  select id, requester_name, status into v_req
+  from public.requests where token::text = p_token
+  for update;
+  if not found then
+    raise exception '編集用リンクが無効です' using errcode = '42501';
+  end if;
+  if v_req.status <> 'pending' then
+    raise exception '受付中のリクエストのみ編集できます' using errcode = '22023';
+  end if;
+
+  select ri.id, i.name, i.card_id, i.rarity into v_old
+  from public.request_items ri
+  join public.items i on i.id = ri.item_id
+  where ri.id = p_request_item_id and ri.request_id = v_req.id;
+  if not found then
+    raise exception '対象のカードがこのリクエストに見つかりません' using errcode = '22023';
+  end if;
+
+  select id, card_id, rarity into v_new
+  from public.items where id = p_new_item_id and name = v_old.name;
+  if not found then
+    raise exception '同じカードの別バリアントのみ選択できます' using errcode = '22023';
+  end if;
+
+  update public.request_items set item_id = v_new.id where id = v_old.id;
+  insert into public.request_edit_logs (request_id, editor_name, field_changed, old_value, new_value)
+  values (v_req.id, v_req.requester_name, 'カード変更',
+          v_old.name || ' ' || coalesce(v_old.card_id, '') || ' ' || coalesce(v_old.rarity, ''),
+          v_old.name || ' ' || coalesce(v_new.card_id, '') || ' ' || coalesce(v_new.rarity, ''));
+
+  return v_req.id;
+end;
+$$;
+
+-- 13-5. 未ログイン(anon)はリクエストを直接書き換えられないようにし、トークン列も見えないようにする
+-- （送信・編集は上記のDB関数経由のみ。管理者(authenticated)の権限は変更しない）
+revoke insert, update, delete on public.requests, public.request_items, public.request_edit_logs from anon;
+revoke select on public.requests from anon;
+grant select (id, requester_name, message, status, price_total, admin_memo, created_at, resolved_at)
+  on public.requests to anon;
 `;
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ 

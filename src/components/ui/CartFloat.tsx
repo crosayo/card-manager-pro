@@ -2,10 +2,11 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ShoppingCart, X, Loader2, Send, Minus, Plus } from 'lucide-react';
+import { ShoppingCart, X, Loader2, Send, Minus, Plus, CheckCircle2, Copy, Check, AlertTriangle, ExternalLink } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { api } from '@/services/api';
 import { useAppContext } from '@/context/AppContext';
+import { buildRequestEditUrl, saveRequestToken } from '@/lib/requestTokens';
 
 export const CartFloat: React.FC = () => {
   const { cartItems, removeFromCart, updateQuantity, clearCart, totalCount } = useCart();
@@ -15,6 +16,91 @@ export const CartFloat: React.FC = () => {
   const [requesterName, setRequesterName] = useState('');
   const [message, setMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
+
+  // 送信完了画面（編集用リンクの表示）
+  const [completedEditUrl, setCompletedEditUrl] = useState<string | null>(null);
+  const [isLinkCopied, setIsLinkCopied] = useState(false);
+
+  const copyEditUrl = async () => {
+    if (!completedEditUrl) return;
+    try {
+      await navigator.clipboard.writeText(completedEditUrl);
+      setIsLinkCopied(true);
+    } catch {
+      addToast('error', 'コピーできませんでした', 'リンクを長押し（または選択）して手動でコピーしてください。');
+    }
+  };
+
+  const closeCompleted = () => {
+    setCompletedEditUrl(null);
+    setIsLinkCopied(false);
+  };
+
+  if (completedEditUrl) {
+    return (
+      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+        <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
+          <div className="p-5 text-center border-b border-slate-100">
+            <CheckCircle2 size={44} className="mx-auto text-green-500 mb-2" />
+            <h3 className="font-bold text-lg text-slate-800">リクエストを送信しました</h3>
+          </div>
+
+          <div className="p-5 space-y-4">
+            <div>
+              <p className="text-sm font-bold text-slate-700 mb-1">あなた専用の編集用リンク</p>
+              <p className="text-xs text-slate-500 mb-2">
+                あとから枚数やメモを変更するときに使います。<b>必ずコピーして保存してください。</b>
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={completedEditUrl}
+                  onFocus={(e) => e.target.select()}
+                  className="flex-1 min-w-0 border border-slate-300 rounded px-3 py-2 text-xs font-mono bg-slate-50 text-slate-600"
+                />
+                <button
+                  type="button"
+                  onClick={copyEditUrl}
+                  className={`shrink-0 px-3 py-2 rounded-lg font-bold text-sm flex items-center gap-1 transition-colors ${
+                    isLinkCopied ? 'bg-green-600 text-white' : 'bg-cyan-600 hover:bg-cyan-700 text-white animate-pulse'
+                  }`}
+                >
+                  {isLinkCopied ? <Check size={16} /> : <Copy size={16} />}
+                  {isLinkCopied ? 'コピー済み' : 'コピー'}
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 flex gap-2">
+              <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p>このリンクを知っている人は誰でもリクエストを編集できます。<b>他の人には共有しないでください。</b></p>
+                <p>このブラウザでは、リクエスト一覧からそのまま編集できます。別の端末やブラウザで編集するときにリンクが必要です。</p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-1">
+              <button
+                type="button"
+                onClick={closeCompleted}
+                className="flex-1 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium text-sm"
+              >
+                {isLinkCopied ? '閉じる' : 'コピーせずに閉じる'}
+              </button>
+              <a
+                href="/requests"
+                onClick={closeCompleted}
+                className="flex-1 bg-slate-700 hover:bg-slate-800 text-white py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-1"
+              >
+                <ExternalLink size={14} /> リクエスト一覧へ
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (totalCount === 0) return null;
 
@@ -38,9 +124,13 @@ export const CartFloat: React.FC = () => {
       setIsOpen(false);
       setRequesterName('');
       setMessage('');
-      addToast('success', 'リクエスト送信完了',
-        `リクエストを受け付けました。/requests ページで確認できます。`
-      );
+      if (request.token) {
+        saveRequestToken(request.id, request.token);
+        setIsLinkCopied(false);
+        setCompletedEditUrl(buildRequestEditUrl(request.token));
+      } else {
+        addToast('success', 'リクエスト送信完了', 'リクエストを受け付けました。リクエスト一覧で確認できます。');
+      }
     } catch (e: any) {
       addToast('error', '送信失敗', e.message);
     } finally {

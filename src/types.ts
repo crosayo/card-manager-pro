@@ -82,7 +82,7 @@ export interface StockLog {
 
 export interface CardRequest {
   id: number;
-  token: string;
+  token?: string; // 編集用トークン（送信直後と管理者にのみ渡される）
   requesterName: string;
   message: string | null;
   status: 'pending' | 'completed' | 'cancelled';

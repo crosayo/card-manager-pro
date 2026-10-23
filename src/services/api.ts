@@ -75,7 +75,12 @@ const mapDbRequestToAppRequest = (db: any): CardRequest => ({
   items: db.request_items ? db.request_items.map(mapDbRequestItemToAppRequestItem) : undefined,
 });
 
-const mapDbNewsToAppNews = (dbNews: any): News => ({
+// requests テーブルの取得列（token は管理者のみ取得する。anon には列単位で閲覧権限がない）
+const REQUEST_PUBLIC_COLUMNS = 'id, requester_name, message, status, price_total, admin_memo, created_at, resolved_at';
+const requestSelect = (includeToken?: boolean) =>
+  `${REQUEST_PUBLIC_COLUMNS}${includeToken ? ', token' : ''}, request_items(*, items(*), supplies(*))`;
+
+const mapDbNewsToAppNews =(dbNews: any): News => ({
   id: dbNews.id,
   content: dbNews.content,
   type: dbNews.type,
@@ -755,11 +760,15 @@ export const api = {
   },
 
   // --- Requests ---
-  fetchRequests: async (status?: 'pending' | 'completed' | 'cancelled'): Promise<CardRequest[]> => {
+  // 編集用トークンは未ログインユーザーには返さない（DB側でも列単位で閲覧を禁止している）
+  fetchRequests: async (
+    status?: 'pending' | 'completed' | 'cancelled',
+    options?: { includeToken?: boolean }
+  ): Promise<CardRequest[]> => {
     ensureConnection();
     let query = supabase
       .from('requests')
-      .select(`*, request_items(*, items(*), supplies(*))`)
+      .select(requestSelect(options?.includeToken))
       .order('created_at', { ascending: false });
     if (status) query = query.eq('status', status);
     const { data, error } = await query;
@@ -770,23 +779,41 @@ export const api = {
     return (data || []).map(mapDbRequestToAppRequest);
   },
 
-  fetchRequestById: async (id: number): Promise<CardRequest> => {
+  fetchRequestById: async (id: number, options?: { includeToken?: boolean }): Promise<CardRequest> => {
     ensureConnection();
     const { data, error } = await supabase
       .from('requests')
-      .select(`*, request_items(*, items(*), supplies(*))`)
+      .select(requestSelect(options?.includeToken))
       .eq('id', id)
       .single();
     if (error) handleSupabaseError(error, 'fetchRequestById');
     return mapDbRequestToAppRequest(data);
   },
 
+  // リクエスト送信。本体と明細をDB関数で一括登録し、編集用トークンを受け取る
   createRequest: async (params: {
     requesterName: string;
     message?: string;
     items: Array<{ itemId?: number; supplyId?: number; quantity: number }>;
   }): Promise<CardRequest> => {
     ensureConnection();
+    const { data: created, error } = await supabase.rpc('create_request', {
+      p_requester_name: params.requesterName,
+      p_message: params.message ?? null,
+      p_items: params.items.map(item => ({
+        item_id: item.itemId ?? null,
+        supply_id: item.supplyId ?? null,
+        quantity: item.quantity,
+      })),
+    });
+    if (!error) {
+      const request = await api.fetchRequestById(created.id);
+      return { ...request, token: created.token };
+    }
+    if (!isMissingFunction(error)) handleSupabaseError(error, 'createRequest(RPC)');
+
+    // RPC未登録時のフォールバック（旧実装）
+    console.warn("RPC 'create_request' not found. Falling back to direct insert.");
     const { data: req, error: reqError } = await supabase
       .from('requests')
       .insert([{ requester_name: params.requesterName, message: params.message || null }])
@@ -803,7 +830,48 @@ export const api = {
     const { error: itemsError } = await supabase.from('request_items').insert(requestItems);
     if (itemsError) handleSupabaseError(itemsError, 'createRequest(items)');
 
-    return api.fetchRequestById(req.id);
+    const request = await api.fetchRequestById(req.id);
+    return { ...request, token: req.token };
+  },
+
+  // 編集用リンクのトークンから対象リクエストのIDを取得（無効なら null）
+  resolveRequestToken: async (token: string): Promise<number | null> => {
+    ensureConnection();
+    const { data, error } = await supabase.rpc('resolve_request_token', { p_token: token });
+    if (error) handleSupabaseError(error, 'resolveRequestToken');
+    return data ?? null;
+  },
+
+  // 申請者による編集（編集用トークンで本人確認。照合・更新・履歴記録はDB関数内で行う）
+  editRequestByToken: async (
+    token: string,
+    params: {
+      message?: string;
+      itemChanges?: Array<{ requestItemId: number; quantity: number }>;
+    }
+  ): Promise<CardRequest> => {
+    ensureConnection();
+    const { data: requestId, error } = await supabase.rpc('edit_request_by_token', {
+      p_token: token,
+      p_message: params.message ?? null,
+      p_item_changes: params.itemChanges
+        ? params.itemChanges.map(c => ({ request_item_id: c.requestItemId, quantity: c.quantity }))
+        : null,
+    });
+    if (error) handleSupabaseError(error, 'editRequestByToken');
+    return api.fetchRequestById(requestId);
+  },
+
+  // 申請者によるバリアント変更（同名カードへの差し替えのみ許可）
+  swapRequestItemByToken: async (token: string, requestItemId: number, newItemId: number): Promise<CardRequest> => {
+    ensureConnection();
+    const { data: requestId, error } = await supabase.rpc('swap_request_item_by_token', {
+      p_token: token,
+      p_request_item_id: requestItemId,
+      p_new_item_id: newItemId,
+    });
+    if (error) handleSupabaseError(error, 'swapRequestItemByToken');
+    return api.fetchRequestById(requestId);
   },
 
   updateRequestStatus: async (
@@ -836,12 +904,12 @@ export const api = {
       throwIfAnyFailed(results, 'updateRequestStatus(unitPrices)');
     }
 
-    return api.fetchRequestById(requestId);
+    return api.fetchRequestById(requestId, { includeToken: true });
   },
 
-  editRequest: async (
+  // 管理者による編集（ログイン済みのためDBのRLS/権限で保護される）
+  editRequestAsAdmin: async (
     requestId: number,
-    requesterName: string,
     params: {
       message?: string;
       itemChanges?: Array<{ requestItemId: number; quantity: number }>;
@@ -849,19 +917,6 @@ export const api = {
     }
   ): Promise<CardRequest> => {
     ensureConnection();
-    // 本人確認
-    const { data: reqData, error: reqFetchError } = await supabase
-      .from('requests')
-      .select('requester_name')
-      .eq('id', requestId)
-      .single();
-    if (reqFetchError) handleSupabaseError(reqFetchError, 'editRequest(fetch)');
-    if (reqData.requester_name !== requesterName) {
-      const e: any = new Error('名前が一致しません。送信時に入力した名前を入力してください。');
-      e.code = 'NAME_MISMATCH';
-      throw e;
-    }
-
     if (params.message !== undefined) {
       const { error } = await supabase.from('requests').update({ message: params.message }).eq('id', requestId);
       if (error) handleSupabaseError(error, 'editRequest(message)');
@@ -883,7 +938,7 @@ export const api = {
       if (error) handleSupabaseError(error, 'editRequest(addItems)');
     }
 
-    return api.fetchRequestById(requestId);
+    return api.fetchRequestById(requestId, { includeToken: true });
   },
 
   addRequestEditLog: async (params: {
