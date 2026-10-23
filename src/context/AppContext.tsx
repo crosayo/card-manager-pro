@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { ToastType, AppError, News, Product, Season, SystemInfo } from '@/types';
 import { api } from '@/services/api';
@@ -56,8 +56,11 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [selectedRarities, setSelectedRarities] = useState<string[]>([]);
   const [showOnlyInStock, setShowOnlyInStock] = useState(false);
 
+  // トーストID: Date.now() だと同一ミリ秒に複数出したとき重複するため連番を付与する
+  const toastSeqRef = useRef(0);
+
   const addToast = useCallback((type: ToastType['type'], title: string, message?: string, errorDetail?: AppError) => {
-    const id = Date.now();
+    const id = Date.now() * 1000 + (toastSeqRef.current++ % 1000);
     setToasts(prev => [...prev, { id, type, title, message, errorDetail }]);
   }, []);
 

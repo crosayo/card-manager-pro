@@ -121,17 +121,26 @@ end;
 $$;
 
 -- 7. RPC関数 (データリセット)
+-- security definer（RLSを迂回する）ため、関数内でログイン済みかを必ず確認する
 create or replace function public.reset_all_data()
 returns void
 language plpgsql
 security definer
+set search_path = public
 as $$
 begin
+  if coalesce(auth.role(), '') <> 'authenticated' then
+    raise exception '権限エラー: ログインが必要です' using errcode = '42501';
+  end if;
   truncate table public.items restart identity cascade;
   truncate table public.products cascade;
   truncate table public.news restart identity cascade;
 end;
 $$;
+
+-- 未ログイン(anon)からは呼び出し自体を禁止する
+revoke execute on function public.reset_all_data() from public, anon;
+grant execute on function public.reset_all_data() to authenticated;
 
 -- 8. RPC関数 (レアリティ集計)
 create or replace function public.get_distinct_rarities()
@@ -145,14 +154,19 @@ end;
 $$;
 
 -- 9. RPC関数 (在庫安全更新)
+-- security definer（RLSを迂回する）ため、関数内でログイン済みかを必ず確認する
 create or replace function public.increment_stock(item_id bigint, delta integer)
 returns json
 language plpgsql
 security definer
+set search_path = public
 as $$
 declare
   updated_row record;
 begin
+  if coalesce(auth.role(), '') <> 'authenticated' then
+    raise exception '権限エラー: ログインが必要です' using errcode = '42501';
+  end if;
   update public.items
   set stock = greatest(0, stock + delta),
       updated_at = now()

@@ -219,26 +219,38 @@ export const RequestsView: React.FC = () => {
       });
 
       // 在庫を実際に減らす + ログ記録
+      const stockFailures: string[] = [];
       for (const ri of (completingRequest.items || [])) {
         if (ri.itemId) {
+          let updatedItem;
           try {
-            const updatedItem = await api.updateStock(ri.itemId, -ri.quantity);
-            await api.addStockLog({
-              itemId: ri.itemId,
-              delta: -ri.quantity,
-              stockAfter: updatedItem.stock,
-              source: 'request',
-              requestId: completingRequest.id,
-            });
-          } catch (e) {
-            console.warn('在庫更新/ログ記録失敗:', e);
+            updatedItem = await api.updateStock(ri.itemId, -ri.quantity);
+          } catch (e: any) {
+            console.error('在庫更新失敗:', e);
+            stockFailures.push(`${ri.item?.name ?? `ID:${ri.itemId}`}（${e.message}）`);
+            continue;
           }
+          api.addStockLog({
+            itemId: ri.itemId,
+            delta: -ri.quantity,
+            stockAfter: updatedItem.stock,
+            source: 'request',
+            requestId: completingRequest.id,
+          }).catch(e => console.warn('ログ記録失敗:', e));
         }
       }
 
       setRequests(prev => prev.map(r => r.id === completingRequest.id ? updated : r));
       setCompletingRequest(null);
-      addToast('success', '完了処理完了', 'リクエストを完了しました。');
+      if (stockFailures.length > 0) {
+        addToast('error', '在庫の減算に失敗したカードがあります', 'リクエストは完了済みです。以下のカードの在庫を手動で調整してください。', {
+          code: 'STOCK_DECREMENT_FAILED',
+          message: stockFailures.join('\n'),
+          timestamp: new Date().toLocaleString(),
+        });
+      } else {
+        addToast('success', '完了処理完了', 'リクエストを完了しました。');
+      }
     } catch (e: any) {
       addToast('error', '完了処理失敗', e.message);
     } finally {
