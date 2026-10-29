@@ -848,6 +848,7 @@ export const api = {
     params: {
       message?: string;
       itemChanges?: Array<{ requestItemId: number; quantity: number }>;
+      itemsToRemove?: number[]; // 削除する request_items の id
     }
   ): Promise<CardRequest> => {
     ensureConnection();
@@ -857,6 +858,7 @@ export const api = {
       p_item_changes: params.itemChanges
         ? params.itemChanges.map(c => ({ request_item_id: c.requestItemId, quantity: c.quantity }))
         : null,
+      p_remove_item_ids: params.itemsToRemove && params.itemsToRemove.length > 0 ? params.itemsToRemove : null,
     });
     if (error) handleSupabaseError(error, 'editRequestByToken');
     return api.fetchRequestById(requestId);
@@ -914,9 +916,22 @@ export const api = {
       message?: string;
       itemChanges?: Array<{ requestItemId: number; quantity: number }>;
       itemsToAdd?: Array<{ itemId?: number; supplyId?: number; quantity: number }>;
+      itemsToRemove?: number[]; // 削除する request_items の id
     }
   ): Promise<CardRequest> => {
     ensureConnection();
+    if (params.itemsToRemove && params.itemsToRemove.length > 0) {
+      const { data: deleted, error } = await supabase
+        .from('request_items')
+        .delete()
+        .eq('request_id', requestId)
+        .in('id', params.itemsToRemove)
+        .select('id');
+      if (error) handleSupabaseError(error, 'editRequest(removeItems)');
+      if (!deleted || deleted.length !== params.itemsToRemove.length) {
+        throw new Error(`カードの削除に失敗しました（${params.itemsToRemove.length}件中${deleted?.length ?? 0}件のみ削除）。権限を確認してください。`);
+      }
+    }
     if (params.message !== undefined) {
       const { error } = await supabase.from('requests').update({ message: params.message }).eq('id', requestId);
       if (error) handleSupabaseError(error, 'editRequest(message)');

@@ -375,7 +375,7 @@ begin
 end;
 $$;
 
--- 13-2. 編集用リンクのトークンからリクエストIDを取得（無効なら null）
+-- 13-2. 編集用リンクのトークンからリクエストIDを取得（無効・処理済みなら null）
 create or replace function public.resolve_request_token(p_token text)
 returns bigint
 language sql
@@ -383,11 +383,17 @@ stable
 security definer
 set search_path = public
 as $$
-  select id from public.requests where token::text = p_token limit 1;
+  select id from public.requests where token::text = p_token and status = 'pending' limit 1;
 $$;
 
--- 13-3. 申請者による編集（メモ・枚数）。編集履歴もここで記録する
-create or replace function public.edit_request_by_token(p_token text, p_message text default null, p_item_changes jsonb default null)
+-- 13-3. 申請者による編集（メモ・枚数・カードの削除）。編集履歴もここで記録する
+drop function if exists public.edit_request_by_token(text, text, jsonb);
+create or replace function public.edit_request_by_token(
+  p_token text,
+  p_message text default null,
+  p_item_changes jsonb default null,
+  p_remove_item_ids bigint[] default null
+)
 returns bigint
 language plpgsql
 security definer
@@ -399,6 +405,7 @@ declare
   v_old record;
   v_qty integer;
   v_new_message text;
+  v_remove_id bigint;
 begin
   select id, requester_name, message, status into v_req
   from public.requests where token::text = p_token
@@ -441,6 +448,31 @@ begin
         values (v_req.id, v_req.requester_name, '数量',
                 v_old.name || ': ' || v_old.quantity || '枚', v_old.name || ': ' || v_qty || '枚');
       end if;
+    end loop;
+  end if;
+
+  if p_remove_item_ids is not null and array_length(p_remove_item_ids, 1) > 0 then
+    -- すべてのカードを削除することはできない（その場合はキャンセルを依頼してもらう）
+    if not exists (
+      select 1 from public.request_items
+      where request_id = v_req.id and not (id = any(p_remove_item_ids))
+    ) then
+      raise exception 'すべてのカードは削除できません。リクエスト自体を取り消す場合は管理者に連絡してください' using errcode = '22023';
+    end if;
+
+    foreach v_remove_id in array p_remove_item_ids loop
+      select ri.id, ri.quantity, coalesce(i.name, s.name, '不明') as name into v_old
+      from public.request_items ri
+      left join public.items i on i.id = ri.item_id
+      left join public.supplies s on s.id = ri.supply_id
+      where ri.id = v_remove_id and ri.request_id = v_req.id;
+      if not found then
+        raise exception '対象のカードがこのリクエストに見つかりません' using errcode = '22023';
+      end if;
+
+      delete from public.request_items where id = v_old.id;
+      insert into public.request_edit_logs (request_id, editor_name, field_changed, old_value, new_value)
+      values (v_req.id, v_req.requester_name, '削除', v_old.name || ': ' || v_old.quantity || '枚', null);
     end loop;
   end if;
 
@@ -500,6 +532,28 @@ revoke insert, update, delete on public.requests, public.request_items, public.r
 revoke select on public.requests from anon;
 grant select (id, requester_name, message, status, price_total, admin_memo, created_at, resolved_at)
   on public.requests to anon;
+
+-- 14. 完了・キャンセル時に編集用リンクを無効化（トークンを新しい値に入れ替える）
+-- 処理済みのリクエストは管理者のみ編集できる。申請者の古いリンクは二度と使えない
+create or replace function public.rotate_request_token_on_resolve()
+returns trigger
+language plpgsql
+as $$
+begin
+  if old.status = 'pending' and new.status is distinct from 'pending' then
+    new.token := gen_random_uuid();
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_request_resolved on public.requests;
+create trigger on_request_resolved
+  before update of status on public.requests
+  for each row execute function public.rotate_request_token_on_resolve();
+
+-- 既に処理済みのリクエストの編集用リンクも無効化（このトリガー導入前に処理されたもの）
+update public.requests set token = gen_random_uuid() where status <> 'pending';
 `;
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ 

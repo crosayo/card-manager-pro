@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ShoppingBag, Loader2, ChevronDown, ChevronRight, Check, X, Edit3, Trash2, RefreshCw, Link2, Info } from 'lucide-react';
+import { ShoppingBag, Loader2, ChevronDown, ChevronRight, Check, X, Edit3, Trash2, RefreshCw, Link2, Info, Undo2, AlertTriangle } from 'lucide-react';
 import { CardRequest, Item, RequestItem, RequestEditLog } from '@/types';
 import { api } from '@/services/api';
 import { useAppContext } from '@/context/AppContext';
@@ -28,6 +28,17 @@ const formatDate = (iso: string) => {
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
+// 在庫の増減指示（カードなら itemId、サプライなら supplyId のどちらか一方）
+type StockAdjustment = { itemId?: number; supplyId?: number; delta: number; label: string };
+
+// リクエスト明細から在庫の増減指示を作る（カード・サプライ以外の明細は対象外）
+const toAdjustment = (ri: RequestItem, delta: number): StockAdjustment | null => {
+  const label = ri.item?.name || ri.supply?.name || '不明';
+  if (ri.itemId) return { itemId: ri.itemId, delta, label };
+  if (ri.supplyId) return { supplyId: ri.supplyId, delta, label };
+  return null;
+};
+
 const getRarityStyle = (rarity: string): string => {
   const style = RARITY_STYLES[rarity] ?? RARITY_DEFAULT_STYLE;
   return `${style.bg} ${style.text} border ${style.border}`;
@@ -50,6 +61,7 @@ export const RequestsView: React.FC = () => {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editMessage, setEditMessage] = useState('');
   const [editQuantities, setEditQuantities] = useState<Record<number, number>>({});
+  const [removedItemIds, setRemovedItemIds] = useState<number[]>([]);
 
   // バリアント変更状態
   const [swappingItemId, setSwappingItemId] = useState<number | null>(null);
@@ -97,7 +109,7 @@ export const RequestsView: React.FC = () => {
         const requestId = await api.resolveRequestToken(tokenParam);
         if (cancelled) return;
         if (requestId === null) {
-          addToast('error', '編集用リンクが無効です', 'リンクが正しいか確認してください。');
+          addToast('error', '編集用リンクが無効です', 'リクエストが処理済み（完了・キャンセル）か、リンクが間違っています。処理済みのリクエストは編集できません。');
         } else {
           saveRequestToken(requestId, tokenParam);
           setOwnedTokens(getSavedRequestTokens());
@@ -158,12 +170,62 @@ export const RequestsView: React.FC = () => {
     const qtys: Record<number, number> = {};
     req.items?.forEach(ri => { qtys[ri.id] = ri.quantity; });
     setEditQuantities(qtys);
+    setRemovedItemIds([]);
   };
 
   const cancelEdit = () => {
     setEditingId(null);
+    setRemovedItemIds([]);
     setSwappingItemId(null);
     setSwapAlternatives([]);
+  };
+
+  const toggleRemoveItem = (riId: number) => {
+    setRemovedItemIds(prev => prev.includes(riId) ? prev.filter(id => id !== riId) : [...prev, riId]);
+    if (swappingItemId === riId) {
+      setSwappingItemId(null);
+      setSwapAlternatives([]);
+    }
+  };
+
+  // 完了済みリクエストの編集時: 完了時に減らした在庫との差分を在庫へ反映する（管理者のみ）
+  // delta は在庫の増減（例: 枚数を2→1にしたら +1、削除したら +元の枚数）
+  const applyStockAdjustments = async (
+    requestId: number,
+    adjustments: StockAdjustment[],
+    note?: string
+  ): Promise<string[]> => {
+    const failures: string[] = [];
+    for (const adj of adjustments) {
+      if (adj.delta === 0) continue;
+      try {
+        // カードは items、サプライは supplies の在庫を増減する
+        const stockAfter = adj.itemId
+          ? (await api.updateStock(adj.itemId, adj.delta)).stock
+          : (await api.updateSupplyStock(adj.supplyId!, adj.delta)).stock;
+        api.addStockLog({
+          itemId: adj.itemId,
+          supplyId: adj.supplyId,
+          delta: adj.delta,
+          stockAfter,
+          source: 'request',
+          requestId,
+          note,
+        }).catch(e => console.warn('ログ記録失敗:', e));
+      } catch (e: any) {
+        console.error('在庫調整失敗:', e);
+        failures.push(`${adj.label}（${adj.delta > 0 ? '+' : ''}${adj.delta}枚: ${e.message}）`);
+      }
+    }
+    return failures;
+  };
+
+  const notifyStockFailures = (failures: string[]) => {
+    addToast('error', '在庫の調整に失敗したカードがあります', 'リクエストの変更は保存済みです。以下のカードの在庫を手動で調整してください。', {
+      code: 'STOCK_ADJUST_FAILED',
+      message: failures.join('\n'),
+      timestamp: new Date().toLocaleString(),
+    });
   };
 
   const openSwap = async (ri: RequestItem) => {
@@ -195,16 +257,39 @@ export const RequestsView: React.FC = () => {
   const doSwap = async (req: CardRequest, ri: RequestItem, newItem: Item) => {
     try {
       let updated: CardRequest;
+      let stockFailures: string[] = [];
       if (isAdmin) {
         await api.swapRequestItem(ri.id, newItem.id);
+        const oldLabel = `${ri.item?.name ?? ''} ${ri.item?.cardId ?? ''} ${ri.item?.rarity ?? ''}`.trim();
+        const newLabel = `${newItem.name} ${newItem.cardId} ${newItem.rarity}`;
+        await api.addRequestEditLog({
+          requestId: req.id,
+          editorName: '管理者',
+          fieldChanged: 'カード変更',
+          oldValue: oldLabel,
+          newValue: newLabel,
+        }).catch(e => console.warn('ログ記録失敗:', e));
+        // 完了済みなら、元のカードの在庫を戻し、差し替え先の在庫を減らす
+        if (req.status === 'completed' && ri.itemId) {
+          stockFailures = await applyStockAdjustments(req.id, [
+            { itemId: ri.itemId, delta: ri.quantity, label: oldLabel },
+            { itemId: newItem.id, delta: -ri.quantity, label: newLabel },
+          ], '完了済みリクエストの編集');
+        }
         updated = await api.fetchRequestById(req.id, { includeToken: true });
       } else {
         updated = await api.swapRequestItemByToken(ownedTokens[req.id], ri.id, newItem.id);
       }
       setRequests(prev => prev.map(r => r.id === req.id ? updated : r));
+      setLogsCache(prev => { const next = { ...prev }; delete next[req.id]; return next; });
+      setExpandedLogs(prev => ({ ...prev, [req.id]: false }));
       setSwappingItemId(null);
       setSwapAlternatives([]);
-      addToast('success', 'カード変更完了', `${newItem.rarity} / ${newItem.cardId} に変更しました。`);
+      if (stockFailures.length > 0) {
+        notifyStockFailures(stockFailures);
+      } else {
+        addToast('success', 'カード変更完了', `${newItem.rarity} / ${newItem.cardId} に変更しました。`);
+      }
     } catch (e: any) {
       addToast('error', '変更失敗', e.message);
     }
@@ -213,8 +298,10 @@ export const RequestsView: React.FC = () => {
   const submitEdit = async (req: CardRequest) => {
     setIsUpdating(true);
     try {
+      // 削除するカードは枚数変更の対象から外す
       const itemChanges = Object.entries(editQuantities)
         .filter(([riId, qty]) => {
+          if (removedItemIds.includes(Number(riId))) return false;
           const orig = req.items?.find(ri => ri.id === Number(riId))?.quantity;
           return orig !== qty;
         })
@@ -224,16 +311,42 @@ export const RequestsView: React.FC = () => {
       const params = {
         message: messageChanged ? editMessage : undefined,
         itemChanges: itemChanges.length > 0 ? itemChanges : undefined,
+        itemsToRemove: removedItemIds.length > 0 ? removedItemIds : undefined,
       };
 
       let updated: CardRequest;
+      let stockFailures: string[] = [];
       if (isAdmin) {
         updated = await api.editRequestAsAdmin(req.id, params);
         // 管理者の編集履歴はクライアントから記録（申請者の編集はDB関数内で記録される）
+        const findItem = (riId: number) => req.items?.find(x => x.id === riId);
         const itemName = (riId: number) => {
-          const ri = req.items?.find(x => x.id === riId);
+          const ri = findItem(riId);
           return ri?.item?.name || ri?.supply?.name || '不明';
         };
+        if (removedItemIds.length > 0) {
+          await api.addRequestEditLog({
+            requestId: req.id,
+            editorName: '管理者',
+            fieldChanged: '削除',
+            oldValue: removedItemIds.map(id => `${itemName(id)}: ${findItem(id)?.quantity}枚`).join(', '),
+          });
+        }
+        // 完了済みなら、枚数の差分・削除分を在庫へ反映（完了時に減らした在庫を戻す）
+        if (req.status === 'completed') {
+          const adjustments: StockAdjustment[] = [];
+          for (const c of itemChanges) {
+            const ri = findItem(c.requestItemId);
+            const adj = ri && toAdjustment(ri, ri.quantity - c.quantity);
+            if (adj) adjustments.push(adj);
+          }
+          for (const id of removedItemIds) {
+            const ri = findItem(id);
+            const adj = ri && toAdjustment(ri, ri.quantity);
+            if (adj) adjustments.push(adj);
+          }
+          stockFailures = await applyStockAdjustments(req.id, adjustments, '完了済みリクエストの編集');
+        }
         if (itemChanges.length > 0) {
           await api.addRequestEditLog({
             requestId: req.id,
@@ -260,7 +373,14 @@ export const RequestsView: React.FC = () => {
       setLogsCache(prev => { const next = { ...prev }; delete next[req.id]; return next; });
       setExpandedLogs(prev => ({ ...prev, [req.id]: false }));
       setEditingId(null);
-      addToast('success', '更新完了', 'リクエストを更新しました。');
+      setRemovedItemIds([]);
+      if (stockFailures.length > 0) {
+        notifyStockFailures(stockFailures);
+      } else {
+        addToast('success', '更新完了', req.status === 'completed'
+          ? 'リクエストを更新し、在庫に反映しました。'
+          : 'リクエストを更新しました。');
+      }
     } catch (e: any) {
       addToast('error', '更新失敗', e.message);
     } finally {
@@ -288,32 +408,16 @@ export const RequestsView: React.FC = () => {
         adminMemo,
       });
 
-      // 在庫を実際に減らす + ログ記録
-      const stockFailures: string[] = [];
-      for (const ri of (completingRequest.items || [])) {
-        if (ri.itemId) {
-          let updatedItem;
-          try {
-            updatedItem = await api.updateStock(ri.itemId, -ri.quantity);
-          } catch (e: any) {
-            console.error('在庫更新失敗:', e);
-            stockFailures.push(`${ri.item?.name ?? `ID:${ri.itemId}`}（${e.message}）`);
-            continue;
-          }
-          api.addStockLog({
-            itemId: ri.itemId,
-            delta: -ri.quantity,
-            stockAfter: updatedItem.stock,
-            source: 'request',
-            requestId: completingRequest.id,
-          }).catch(e => console.warn('ログ記録失敗:', e));
-        }
-      }
+      // 在庫を実際に減らす + ログ記録（カード・サプライとも）
+      const adjustments = (completingRequest.items || [])
+        .map(ri => toAdjustment(ri, -ri.quantity))
+        .filter((adj): adj is StockAdjustment => adj !== null);
+      const stockFailures = await applyStockAdjustments(completingRequest.id, adjustments);
 
       setRequests(prev => prev.map(r => r.id === completingRequest.id ? updated : r));
       setCompletingRequest(null);
       if (stockFailures.length > 0) {
-        addToast('error', '在庫の減算に失敗したカードがあります', 'リクエストは完了済みです。以下のカードの在庫を手動で調整してください。', {
+        addToast('error', '在庫の減算に失敗したものがあります', 'リクエストは完了済みです。以下の在庫を手動で調整してください。', {
           code: 'STOCK_DECREMENT_FAILED',
           message: stockFailures.join('\n'),
           timestamp: new Date().toLocaleString(),
@@ -449,13 +553,23 @@ export const RequestsView: React.FC = () => {
               <div className="p-4">
                 {editingId === req.id ? (
                   <div className="space-y-3">
+                    {req.status === 'completed' && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800 flex gap-2">
+                        <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                        <p>完了済みのリクエストです。枚数の変更・削除・カードの変更は、<b>差分が在庫に自動で反映されます</b>。</p>
+                      </div>
+                    )}
+
                     {/* 数量編集 */}
-                    {req.items?.map(ri => (
+                    {req.items?.map(ri => {
+                      const isRemoved = removedItemIds.includes(ri.id);
+                      return (
                       <div key={ri.id} className="space-y-1">
-                        <div className="flex items-center gap-3 text-sm">
+                        <div className={`flex items-center gap-3 text-sm ${isRemoved ? 'opacity-50' : ''}`}>
                           <div className="flex-1 min-w-0">
-                            <div className="text-slate-700 font-medium">{ri.item?.name || ri.supply?.name || '不明'}</div>
-                            {ri.item && (
+                            <div className={`text-slate-700 font-medium ${isRemoved ? 'line-through' : ''}`}>{ri.item?.name || ri.supply?.name || '不明'}</div>
+                            {isRemoved && <div className="text-[11px] text-red-500 font-bold">更新すると削除されます</div>}
+                            {ri.item && !isRemoved && (
                               <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                                 <span className="font-mono text-xs text-slate-400">{ri.item.cardId}</span>
                                 <span className={`px-1.5 py-0.5 rounded text-[11px] font-bold border ${getRarityStyle(ri.item.rarity)}`}>
@@ -473,9 +587,25 @@ export const RequestsView: React.FC = () => {
                             )}
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
-                            <button onClick={() => setEditQuantities(prev => ({ ...prev, [ri.id]: Math.max(1, (prev[ri.id] ?? ri.quantity) - 1) }))} className="w-7 h-7 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center">-</button>
-                            <span className="w-8 text-center font-bold">{editQuantities[ri.id] ?? ri.quantity}</span>
-                            <button onClick={() => setEditQuantities(prev => ({ ...prev, [ri.id]: (prev[ri.id] ?? ri.quantity) + 1 }))} className="w-7 h-7 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center">+</button>
+                            {!isRemoved && (
+                              <>
+                                <button onClick={() => setEditQuantities(prev => ({ ...prev, [ri.id]: Math.max(1, (prev[ri.id] ?? ri.quantity) - 1) }))} className="w-7 h-7 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center">-</button>
+                                <span className="w-8 text-center font-bold">{editQuantities[ri.id] ?? ri.quantity}</span>
+                                <button onClick={() => setEditQuantities(prev => ({ ...prev, [ri.id]: (prev[ri.id] ?? ri.quantity) + 1 }))} className="w-7 h-7 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center">+</button>
+                              </>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => toggleRemoveItem(ri.id)}
+                              className={`px-2 h-7 rounded text-xs font-bold flex items-center gap-1 border ${
+                                isRemoved
+                                  ? 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                                  : 'bg-white text-red-500 border-red-200 hover:bg-red-50'
+                              }`}
+                              title={isRemoved ? '削除を取り消す' : 'このカードをリクエストから削除'}
+                            >
+                              {isRemoved ? <><Undo2 size={12} /> 元に戻す</> : <><Trash2 size={12} /> 削除</>}
+                            </button>
                           </div>
                         </div>
 
@@ -510,7 +640,8 @@ export const RequestsView: React.FC = () => {
                           </div>
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
 
                     {/* メモ編集 */}
                     <div>
@@ -522,11 +653,17 @@ export const RequestsView: React.FC = () => {
                       />
                     </div>
 
+                    {(req.items?.length ?? 0) > 0 && removedItemIds.length >= (req.items?.length ?? 0) && (
+                      <p className="text-xs text-red-500">
+                        すべてのカードは削除できません。{isAdmin ? 'リクエスト自体を取り消す場合は「キャンセル」を使ってください。' : 'リクエスト自体を取り消したい場合は管理者に連絡してください。'}
+                      </p>
+                    )}
+
                     <div className="flex gap-2">
                       <button onClick={cancelEdit} className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded">キャンセル</button>
                       <button
                         onClick={() => submitEdit(req)}
-                        disabled={isUpdating}
+                        disabled={isUpdating || ((req.items?.length ?? 0) > 0 && removedItemIds.length >= (req.items?.length ?? 0))}
                         className="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded text-sm font-bold flex items-center gap-1 disabled:opacity-50"
                       >
                         {isUpdating ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
@@ -630,6 +767,16 @@ export const RequestsView: React.FC = () => {
 
                   {/* 申請者の編集ボタン（このブラウザに編集用トークンがある場合のみ） */}
                   {!isAdmin && req.status === 'pending' && ownedTokens[req.id] && editingId !== req.id && (
+                    <button
+                      onClick={() => startEdit(req)}
+                      className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-200 bg-slate-100 rounded flex items-center gap-1"
+                    >
+                      <Edit3 size={14} /> 編集
+                    </button>
+                  )}
+
+                  {/* 管理者の編集ボタン（処理済みのリクエストも管理者のみ編集できる） */}
+                  {isAdmin && req.status !== 'pending' && editingId !== req.id && (
                     <button
                       onClick={() => startEdit(req)}
                       className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-200 bg-slate-100 rounded flex items-center gap-1"
