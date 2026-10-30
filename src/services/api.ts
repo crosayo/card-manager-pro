@@ -1,6 +1,6 @@
 
 import { supabase, isSupabaseEnabled } from '../lib/supabase';
-import { Item, Product, PaginatedItems, SortConfig, Season, News, SystemInfo, StockLog, CardRequest, RequestItem, RequestEditLog, Supply, Invite } from '../types';
+import { Item, Product, PaginatedItems, SortConfig, Season, News, SystemInfo, StockLog, CardRequest, RequestItem, RequestEditLog, Supply, Invite, InviteAccessLog } from '../types';
 import { INITIAL_RARITIES, INITIAL_SEASONS, INITIAL_SYSTEM_INFO } from '../constants';
 import { normalizeForStorage, toSearchKey, toSearchTokens } from '../utils';
 
@@ -84,6 +84,15 @@ const mapDbInviteToAppInvite = (db: any): Invite => ({
   createdAt: db.created_at,
   lastUsedAt: db.last_used_at,
   useCount: db.use_count ?? 0,
+  autoExtendDays: db.auto_extend_days ?? null,
+});
+
+const mapDbInviteAccessLog = (db: any): InviteAccessLog => ({
+  id: db.id,
+  inviteId: db.invite_id,
+  accessedAt: db.accessed_at,
+  ip: db.ip,
+  userAgent: db.user_agent,
 });
 
 // requests テーブルの取得列（token は管理者のみ取得する。anon には列単位で閲覧権限がない）
@@ -185,12 +194,17 @@ export const api = {
     return (data || []).map(mapDbInviteToAppInvite);
   },
 
-  createInvite: async (params: { label?: string; days: number }): Promise<Invite> => {
+  // autoExtend=true なら、アクセスされるたびに「今から days 日後」まで有効期限を延ばす
+  createInvite: async (params: { label?: string; days: number; autoExtend?: boolean }): Promise<Invite> => {
     ensureConnection();
     const expiresAt = new Date(Date.now() + params.days * 24 * 60 * 60 * 1000).toISOString();
     const { data, error } = await supabase
       .from('invites')
-      .insert([{ label: params.label?.trim() || null, expires_at: expiresAt }])
+      .insert([{
+        label: params.label?.trim() || null,
+        expires_at: expiresAt,
+        auto_extend_days: params.autoExtend ? params.days : null,
+      }])
       .select()
       .single();
     if (error) handleSupabaseError(error, 'createInvite');
@@ -211,6 +225,60 @@ export const api = {
       .single();
     if (error) handleSupabaseError(error, 'extendInvite');
     return mapDbInviteToAppInvite(data);
+  },
+
+  // 選択した複数の招待リンクをまとめて延長する（取消済みは対象外）
+  extendInvites: async (invites: Invite[], days: number): Promise<Invite[]> => {
+    ensureConnection();
+    const results = await Promise.allSettled(
+      invites.filter(i => !i.revokedAt).map(i => api.extendInvite(i, days))
+    );
+    const failed = results.filter(r => r.status === 'rejected');
+    if (failed.length > 0) {
+      throw new Error(`${results.length}件中${failed.length}件の延長に失敗しました。(${(failed[0] as PromiseRejectedResult).reason?.message ?? ''})`);
+    }
+    return results.map(r => (r as PromiseFulfilledResult<Invite>).value);
+  },
+
+  // 自動延長の設定（days=null で解除）
+  setInviteAutoExtend: async (id: number, days: number | null): Promise<Invite> => {
+    ensureConnection();
+    const { data, error } = await supabase
+      .from('invites')
+      .update({ auto_extend_days: days })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) handleSupabaseError(error, 'setInviteAutoExtend');
+    return mapDbInviteToAppInvite(data);
+  },
+
+  // 選択した複数の招待リンクをまとめて取り消す
+  revokeInvites: async (ids: number[]): Promise<Invite[]> => {
+    ensureConnection();
+    const { data, error } = await supabase
+      .from('invites')
+      .update({ revoked_at: new Date().toISOString() })
+      .in('id', ids)
+      .is('revoked_at', null)
+      .select();
+    if (error) handleSupabaseError(error, 'revokeInvites');
+    return (data || []).map(mapDbInviteToAppInvite);
+  },
+
+  fetchInviteAccessLogs: async (inviteId: number, limit: number = 100): Promise<InviteAccessLog[]> => {
+    ensureConnection();
+    const { data, error } = await supabase
+      .from('invite_access_logs')
+      .select('*')
+      .eq('invite_id', inviteId)
+      .order('accessed_at', { ascending: false })
+      .limit(limit);
+    if (error) {
+      if (error.code === '42P01') return [];
+      handleSupabaseError(error, 'fetchInviteAccessLogs');
+    }
+    return (data || []).map(mapDbInviteAccessLog);
   },
 
   revokeInvite: async (id: number): Promise<Invite> => {

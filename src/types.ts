@@ -69,6 +69,16 @@ export interface Invite {
   createdAt: string;
   lastUsedAt: string | null;
   useCount: number;
+  autoExtendDays: number | null; // アクセスされるたびに「今からこの日数」まで延長（null=自動延長なし）
+}
+
+// 招待リンクのアクセス履歴（90日分）
+export interface InviteAccessLog {
+  id: number;
+  inviteId: number;
+  accessedAt: string;
+  ip: string | null;
+  userAgent: string | null;
 }
 
 // 閲覧者（未ログイン）の招待リンクの状態
