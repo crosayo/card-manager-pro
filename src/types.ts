@@ -57,7 +57,26 @@ export type SortConfig = {
   direction: 'asc' | 'desc';
 };
 
-export type TabType = 'dashboard' | 'inventory' | 'requests' | 'products' | 'logs' | 'scraper' | 'settings' | 'supplies';
+export type TabType = 'dashboard' | 'inventory' | 'requests' | 'products' | 'logs' | 'scraper' | 'settings' | 'supplies' | 'invites';
+
+// 招待リンク（期限付きの閲覧・リクエスト権限）
+export interface Invite {
+  id: number;
+  code: string;
+  label: string | null;      // 誰に渡したかのメモ
+  expiresAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  useCount: number;
+}
+
+// 閲覧者（未ログイン）の招待リンクの状態
+export type InviteStatus =
+  | { state: 'none' }                                   // 招待コードなし
+  | { state: 'checking' }                               // 確認中
+  | { state: 'valid'; expiresAt: string; label: string | null }
+  | { state: 'invalid' };                               // 期限切れ・取消・存在しない
 
 export type PaginatedItems = {
   data: Item[];

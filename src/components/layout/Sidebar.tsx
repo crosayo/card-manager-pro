@@ -4,7 +4,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { Database, X, LayoutDashboard, Layers, Menu, Download, Settings, LogOut, LogIn, Calendar, ChevronDown, ChevronRight, Folder, Info, ScrollText, ShoppingBag, Package, Inbox } from 'lucide-react';
+import { Database, X, LayoutDashboard, Layers, Menu, Download, Settings, LogOut, LogIn, Calendar, ChevronDown, ChevronRight, Folder, Info, ScrollText, ShoppingBag, Package, Inbox, Link2 } from 'lucide-react';
 import { Product, TabType, Season } from '@/types';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/services/api';
@@ -50,6 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'requests', path: '/requests', icon: Inbox, label: 'リクエスト管理', adminOnly: true, badge: true },
     { id: 'products', path: '/products', icon: Menu, label: '製品マスタ', adminOnly: true },
     { id: 'logs', path: '/logs', icon: ScrollText, label: '在庫ログ', adminOnly: true },
+    { id: 'invites', path: '/invites', icon: Link2, label: '招待リンク', adminOnly: true },
     { id: 'scraper', path: '/scraper', icon: Download, label: 'Wiki取込', adminOnly: true },
     { id: 'settings', path: '/settings', icon: Settings, label: 'システム設定', adminOnly: true },
   ];

@@ -1,6 +1,6 @@
 
 import { supabase, isSupabaseEnabled } from '../lib/supabase';
-import { Item, Product, PaginatedItems, SortConfig, Season, News, SystemInfo, StockLog, CardRequest, RequestItem, RequestEditLog, Supply } from '../types';
+import { Item, Product, PaginatedItems, SortConfig, Season, News, SystemInfo, StockLog, CardRequest, RequestItem, RequestEditLog, Supply, Invite } from '../types';
 import { INITIAL_RARITIES, INITIAL_SEASONS, INITIAL_SYSTEM_INFO } from '../constants';
 import { normalizeForStorage, toSearchKey, toSearchTokens } from '../utils';
 
@@ -73,6 +73,17 @@ const mapDbRequestToAppRequest = (db: any): CardRequest => ({
   createdAt: db.created_at,
   resolvedAt: db.resolved_at,
   items: db.request_items ? db.request_items.map(mapDbRequestItemToAppRequestItem) : undefined,
+});
+
+const mapDbInviteToAppInvite = (db: any): Invite => ({
+  id: db.id,
+  code: db.code,
+  label: db.label,
+  expiresAt: db.expires_at,
+  revokedAt: db.revoked_at,
+  createdAt: db.created_at,
+  lastUsedAt: db.last_used_at,
+  useCount: db.use_count ?? 0,
 });
 
 // requests テーブルの取得列（token は管理者のみ取得する。anon には列単位で閲覧権限がない）
@@ -149,6 +160,75 @@ export const api = {
 
   signOut: async () => {
     if (isSupabaseEnabled && supabase) await supabase.auth.signOut();
+  },
+
+  // --- 招待リンク ---
+  // 招待コードを検証し、最終利用日時を記録する（未ログインでも呼べる）
+  redeemInvite: async (code: string): Promise<{ valid: boolean; expiresAt?: string; label?: string | null }> => {
+    ensureConnection();
+    const { data, error } = await supabase.rpc('redeem_invite', { p_code: code });
+    if (error) {
+      // SQL未適用の環境では招待制が無効なため、従来どおり公開として扱う
+      if (isMissingFunction(error)) return { valid: true, expiresAt: undefined, label: null };
+      handleSupabaseError(error, 'redeemInvite');
+    }
+    return { valid: !!data?.valid, expiresAt: data?.expires_at, label: data?.label ?? null };
+  },
+
+  fetchInvites: async (): Promise<Invite[]> => {
+    ensureConnection();
+    const { data, error } = await supabase.from('invites').select('*').order('created_at', { ascending: false });
+    if (error) {
+      if (error.code === '42P01') return [];
+      handleSupabaseError(error, 'fetchInvites');
+    }
+    return (data || []).map(mapDbInviteToAppInvite);
+  },
+
+  createInvite: async (params: { label?: string; days: number }): Promise<Invite> => {
+    ensureConnection();
+    const expiresAt = new Date(Date.now() + params.days * 24 * 60 * 60 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from('invites')
+      .insert([{ label: params.label?.trim() || null, expires_at: expiresAt }])
+      .select()
+      .single();
+    if (error) handleSupabaseError(error, 'createInvite');
+    return mapDbInviteToAppInvite(data);
+  },
+
+  // 有効期限を延長する（期限切れのものは今から数えて延長）。取消済みは延長できない
+  extendInvite: async (invite: Invite, days: number): Promise<Invite> => {
+    ensureConnection();
+    const base = Math.max(Date.now(), new Date(invite.expiresAt).getTime());
+    const expiresAt = new Date(base + days * 24 * 60 * 60 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from('invites')
+      .update({ expires_at: expiresAt })
+      .eq('id', invite.id)
+      .is('revoked_at', null)
+      .select()
+      .single();
+    if (error) handleSupabaseError(error, 'extendInvite');
+    return mapDbInviteToAppInvite(data);
+  },
+
+  revokeInvite: async (id: number): Promise<Invite> => {
+    ensureConnection();
+    const { data, error } = await supabase
+      .from('invites')
+      .update({ revoked_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) handleSupabaseError(error, 'revokeInvite');
+    return mapDbInviteToAppInvite(data);
+  },
+
+  deleteInvite: async (id: number): Promise<void> => {
+    ensureConnection();
+    const { error } = await supabase.from('invites').delete().eq('id', id);
+    if (error) handleSupabaseError(error, 'deleteInvite');
   },
 
   // ログイン中の管理者のアクセストークン（サーバー側APIの認証に使う）。未ログインなら null

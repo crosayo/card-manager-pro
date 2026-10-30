@@ -15,6 +15,8 @@ const notoSansJP = Noto_Sans_JP({
 export const metadata: Metadata = {
   title: "Card Manager Pro",
   description: "Trading card inventory management system",
+  // 招待制のため検索エンジンに登録させない（不要なアクセス・転送量も抑える）
+  robots: { index: false, follow: false },
 };
 
 export default function RootLayout({

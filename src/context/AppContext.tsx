@@ -3,12 +3,16 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { ToastType, AppError, News, Product, Season, SystemInfo } from '@/types';
+import { ToastType, AppError, News, Product, Season, SystemInfo, InviteStatus } from '@/types';
 import { api } from '@/services/api';
+import { getInviteCode } from '@/lib/invite';
 import { INITIAL_RARITIES, INITIAL_SEASONS, INITIAL_SYSTEM_INFO } from '@/constants';
 
 interface AppContextType {
   isAdmin: boolean;
+  isAuthReady: boolean;          // ログイン状態の確認が終わったか
+  inviteStatus: InviteStatus;    // 未ログイン時の招待リンクの状態
+  refreshInviteStatus: () => Promise<void>;
   user: any;
   isLoading: boolean;
   news: News[];
@@ -45,6 +49,8 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [inviteStatus, setInviteStatus] = useState<InviteStatus>({ state: 'checking' });
   const [user, setUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [news, setNews] = useState<News[]>([]);
@@ -201,11 +207,31 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  // 招待リンクの状態を確認する。招待コードが無くても呼び、DB関数が未登録なら
+  // 「招待制は未導入（従来どおり公開）」として扱う（SQL適用前のデプロイで閲覧者を締め出さないため）
+  const refreshInviteStatus = useCallback(async () => {
+    const code = getInviteCode();
+    setInviteStatus({ state: 'checking' });
+    try {
+      const result = await api.redeemInvite(code ?? '');
+      if (result.valid) {
+        setInviteStatus({ state: 'valid', expiresAt: result.expiresAt ?? '', label: result.label ?? null });
+      } else {
+        setInviteStatus(code ? { state: 'invalid' } : { state: 'none' });
+      }
+    } catch (e) {
+      console.error('招待リンクの確認に失敗しました', e);
+      setInviteStatus(code ? { state: 'invalid' } : { state: 'none' });
+    }
+  }, []);
+
   useEffect(() => {
     const { data: authListener } = api.onAuthStateChange((session) => {
       setUser(session?.user ?? null);
       setIsAdmin(!!session?.user);
+      setIsAuthReady(true);
     });
+    refreshInviteStatus();
     refreshProducts();
     refreshRarities();
     refreshSeasons();
@@ -214,11 +240,34 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
     return () => {
       authListener?.subscription.unsubscribe();
     };
-  }, [refreshProducts, refreshRarities, refreshSeasons, refreshNews, refreshSystemInfo]);
+  }, [refreshInviteStatus, refreshProducts, refreshRarities, refreshSeasons, refreshNews, refreshSystemInfo]);
+
+  // 招待制では、未ログイン時は招待コードなしだとデータが返らないため、
+  // ログインしたら共通データを読み直す
+  useEffect(() => {
+    if (!isAdmin) return;
+    refreshProducts();
+    refreshRarities();
+    refreshSeasons();
+    refreshNews();
+    refreshSystemInfo();
+  }, [isAdmin, refreshProducts, refreshRarities, refreshSeasons, refreshNews, refreshSystemInfo]);
+
+  // 閲覧中に招待リンクの期限が来たら、その時点で閲覧できない状態にする
+  useEffect(() => {
+    if (inviteStatus.state !== 'valid' || !inviteStatus.expiresAt) return;
+    const remaining = new Date(inviteStatus.expiresAt).getTime() - Date.now();
+    if (remaining > 2 ** 31 - 1) return; // setTimeout の上限（約24.8日）を超える場合は次回の読み込み時に判定
+    const timer = setTimeout(() => setInviteStatus({ state: 'invalid' }), Math.max(0, remaining));
+    return () => clearTimeout(timer);
+  }, [inviteStatus]);
 
   return (
     <AppContext.Provider value={{
       isAdmin,
+      isAuthReady,
+      inviteStatus,
+      refreshInviteStatus,
       user,
       isLoading,
       news,
