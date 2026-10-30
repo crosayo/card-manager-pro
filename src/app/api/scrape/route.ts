@@ -1,5 +1,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
 // ── HTML ユーティリティ ──────────────────────────────────────────
 function decodeEntities(str: string): string {
@@ -222,17 +223,72 @@ function extractCategory(html: string): string {
   return '';
 }
 
+// ── アクセス制限 ─────────────────────────────────────────────────
+const ALLOWED_HOSTS = ['yugioh-wiki.net'];
+const MAX_REDIRECTS = 3;
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
+
+// http(s) かつ許可ホスト（またはそのサブドメイン）のみ。ポート指定・認証情報付きURLは拒否
+function isAllowedUrl(raw: string): boolean {
+  let u: URL;
+  try { u = new URL(raw); } catch { return false; }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+  if (u.port || u.username || u.password) return false;
+  const host = u.hostname.toLowerCase();
+  return ALLOWED_HOSTS.some(h => host === h || host.endsWith(`.${h}`));
+}
+
+// リダイレクトを自前で追い、転送先も許可ホストかを毎回検査する（許可外なら null）
+async function fetchAllowed(url: string): Promise<Response | null> {
+  let current = url;
+  for (let i = 0; i <= MAX_REDIRECTS; i++) {
+    const res = await fetch(current, { headers: { 'User-Agent': USER_AGENT }, redirect: 'manual' });
+    if (res.status < 300 || res.status >= 400) return res;
+    const location = res.headers.get('location');
+    if (!location) return res;
+    current = new URL(location, current).toString();
+    if (!isAllowedUrl(current)) return null;
+  }
+  return null;
+}
+
+// Authorization: Bearer <アクセストークン> を Supabase Auth で検証する。失敗時はエラー応答を返す
+async function verifyAdmin(req: NextRequest): Promise<NextResponse | null> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return NextResponse.json({ error: 'サーバーの設定が不足しています。' }, { status: 500 });
+  }
+  const token = req.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
+  if (!token) {
+    return NextResponse.json({ error: 'ログインが必要です。' }, { status: 401 });
+  }
+  const client = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
+  const { data, error } = await client.auth.getUser(token);
+  if (error || !data.user) {
+    return NextResponse.json({ error: 'ログインの有効期限が切れています。再度ログインしてください。' }, { status: 401 });
+  }
+  return null;
+}
+
 // ── メインハンドラー ─────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
-    const { url } = await req.json();
-    if (!url) return NextResponse.json({ error: 'URL is required' }, { status: 400 });
+    // 管理者（ログイン済み）のみ利用可能。第三者による踏み台利用を防ぐ
+    const authError = await verifyAdmin(req);
+    if (authError) return authError;
 
-    const fetchResponse = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      }
-    });
+    const { url } = await req.json();
+    if (!url || typeof url !== 'string') return NextResponse.json({ error: 'URLを指定してください。' }, { status: 400 });
+
+    // 取得先は遊戯王カードWikiのみ許可（リダイレクト先も同様に検査する）
+    if (!isAllowedUrl(url)) {
+      return NextResponse.json({ error: `取込できるのは ${ALLOWED_HOSTS.join(' / ')} のページのみです。` }, { status: 400 });
+    }
+    const fetchResponse = await fetchAllowed(url);
+    if (!fetchResponse) {
+      return NextResponse.json({ error: '許可されていないURLへ転送されたため、取得を中止しました。' }, { status: 400 });
+    }
     if (!fetchResponse.ok) {
       return NextResponse.json({ error: `Failed to fetch URL: ${fetchResponse.statusText}` }, { status: 500 });
     }

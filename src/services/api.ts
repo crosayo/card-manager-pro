@@ -151,6 +151,13 @@ export const api = {
     if (isSupabaseEnabled && supabase) await supabase.auth.signOut();
   },
 
+  // ログイン中の管理者のアクセストークン（サーバー側APIの認証に使う）。未ログインなら null
+  getAccessToken: async (): Promise<string | null> => {
+    if (!isSupabaseEnabled || !supabase) return null;
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token ?? null;
+  },
+
   // --- Products ---
   fetchProducts: async (): Promise<Product[]> => {
     ensureConnection();

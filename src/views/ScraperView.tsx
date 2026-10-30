@@ -71,9 +71,14 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
   };
 
   const fetchAndParseUrl = async (targetUrl: string): Promise<ScrapedItem[]> => {
+    // サーバー側APIは管理者のみ利用可能なため、ログイン中のアクセストークンを付けて呼ぶ
+    const accessToken = await api.getAccessToken();
+    if (!accessToken) {
+      throw new Error('ログインの有効期限が切れています。再度ログインしてください。');
+    }
     const response = await fetch('/api/scrape', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({ url: targetUrl })
     });
 
