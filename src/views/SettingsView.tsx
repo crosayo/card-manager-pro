@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Shield, Loader2, Save, FileUp, Database, AlertCircle, CheckCircle2, List, Copy, Terminal, Download, Trash2, AlertTriangle, RefreshCw, Calendar, Plus, Wand2, Upload, ArrowUp, ArrowDown, X, Monitor, Bell, Send } from 'lucide-react';
+import { Settings, Shield, LoaderCircle, Save, FileUp, Database, CircleAlert, CircleCheck, List, Copy, Terminal, Download, Trash, TriangleAlert, RefreshCw, Calendar, Plus, WandSparkles, Upload, ArrowUp, ArrowDown, X, Monitor, Bell, Send } from 'lucide-react';
 import { api } from '../services/api';
 import { AppError, Season, ToastType } from '../types';
 import { useAppContext } from '../context/AppContext';
@@ -1064,7 +1064,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <Settings /> システム設定
         </h2>
         <button onClick={saveAllConfig} disabled={isSaving || globalLoading} className="bg-cyan-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-cyan-700 flex items-center gap-2 shadow-sm">
-          {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+          {isSaving ? <LoaderCircle className="animate-spin" size={18} /> : <Save size={18} />}
           全体設定を保存
         </button>
       </div>
@@ -1079,7 +1079,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           {/* SQL Editor Section */}
           <div className="bg-amber-50 border-l-4 border-amber-500 p-6 rounded-lg shadow-sm">
             <h3 className="text-lg font-bold text-amber-800 flex items-center gap-2 mb-2">
-              <AlertCircle /> データベース構成 (SQL)
+              <CircleAlert /> データベース構成 (SQL)
             </h3>
             <p className="text-amber-700 mb-4 text-sm">
               在庫安全更新(RPC)、お知らせ機能、ソート対応のためのテーブル定義です。<br/>
@@ -1118,7 +1118,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 disabled={isSaving || globalLoading}
                 className="bg-slate-600 text-white px-4 py-1.5 rounded-lg font-bold text-sm hover:bg-slate-700 flex items-center gap-2 transition-colors disabled:opacity-50"
               >
-                {isSaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+                {isSaving ? <LoaderCircle className="animate-spin" size={16} /> : <Save size={16} />}
                 変更を保存
               </button>
             </div>
@@ -1165,7 +1165,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 disabled={isSaving || globalLoading}
                 className="bg-indigo-600 text-white px-4 py-1.5 rounded-lg font-bold text-sm hover:bg-indigo-700 flex items-center gap-2 transition-colors disabled:opacity-50"
               >
-                {isSaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+                {isSaving ? <LoaderCircle className="animate-spin" size={16} /> : <Save size={16} />}
                 変更を保存
               </button>
             </div>
@@ -1237,7 +1237,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 disabled={isSaving || globalLoading}
                 className="bg-green-600 text-white px-4 py-1.5 rounded-lg font-bold text-sm hover:bg-green-700 flex items-center gap-2 transition-colors disabled:opacity-50"
               >
-                {isSaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+                {isSaving ? <LoaderCircle className="animate-spin" size={16} /> : <Save size={16} />}
                 変更を保存
               </button>
             </div>
@@ -1283,7 +1283,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           {/* Data Maintenance */}
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
             <h3 className="text-lg font-bold text-slate-700 mb-4 border-b pb-2 flex items-center gap-2">
-              <Wand2 className="text-purple-600" /> データメンテナンス
+              <WandSparkles className="text-purple-600" /> データメンテナンス
             </h3>
             <div className="flex items-center justify-between">
               <div>
@@ -1295,7 +1295,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 disabled={isNormalizing || globalLoading}
                 className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 disabled:opacity-50 text-sm"
               >
-                {isNormalizing ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+                {isNormalizing ? <LoaderCircle className="animate-spin" size={16} /> : <RefreshCw size={16} />}
                 {isNormalizing ? `処理中... ${normalizationCount}件` : '正規化を実行'}
               </button>
             </div>
@@ -1312,7 +1312,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 disabled={isBackingUp || globalLoading}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                {isBackingUp ? <Loader2 className="animate-spin" size={18} /> : <Download size={18} />}
+                {isBackingUp ? <LoaderCircle className="animate-spin" size={18} /> : <Download size={18} />}
                 {isBackingUp ? `取得中... ${backupProgress}件` : 'バックアップ (Export)'}
               </button>
 
@@ -1321,7 +1321,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 disabled={isRestoring || globalLoading}
                 className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                {isRestoring ? <Loader2 className="animate-spin" size={18} /> : <Upload size={18} />}
+                {isRestoring ? <LoaderCircle className="animate-spin" size={18} /> : <Upload size={18} />}
                 {isRestoring ? '復元中...' : 'バックアップを復元 (Import)'}
               </button>
               <input 
@@ -1364,7 +1364,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   disabled={isSavingWebhook}
                   className="bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 disabled:opacity-50"
                 >
-                  {isSavingWebhook ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+                  {isSavingWebhook ? <LoaderCircle className="animate-spin" size={16} /> : <Save size={16} />}
                   保存
                 </button>
                 <button
@@ -1372,7 +1372,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   disabled={isTestingSending || !discordWebhookUrl.trim()}
                   className="bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 disabled:opacity-50"
                 >
-                  {isTestingSending ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                  {isTestingSending ? <LoaderCircle className="animate-spin" size={16} /> : <Send size={16} />}
                   テスト送信
                 </button>
               </div>
@@ -1382,7 +1382,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           {/* Danger Zone */}
           <div className="border border-red-200 rounded-xl overflow-hidden">
              <div className="bg-red-50 p-4 border-b border-red-200 flex items-center gap-2 text-red-700 font-bold">
-               <AlertTriangle size={20} /> Danger Zone (全データの削除)
+               <TriangleAlert size={20} /> Danger Zone (全データの削除)
              </div>
              <div className="p-6 bg-white">
                <button
@@ -1390,7 +1390,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                  disabled={isResetting || globalLoading}
                  className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-bold shadow-md disabled:opacity-50 flex items-center gap-2 transition-colors ml-auto"
                >
-                 {isResetting ? <Loader2 className="animate-spin" size={18} /> : <Trash2 size={18} />}
+                 {isResetting ? <LoaderCircle className="animate-spin" size={18} /> : <Trash size={18} />}
                  データベースを完全にリセットする
                </button>
              </div>

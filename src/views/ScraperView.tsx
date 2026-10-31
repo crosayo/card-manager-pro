@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Download, Zap, RefreshCw, Check, Loader2, Save, Trash2, Copy, Plus, Database, ArrowRight, Bookmark, AlertTriangle, ArrowRightCircle, CheckSquare, Square, Layers } from 'lucide-react';
+import { Download, Zap, RefreshCw, Check, LoaderCircle, Save, Trash, Copy, Plus, Database, ArrowRight, Bookmark, TriangleAlert, CircleArrowRight, SquareCheckBig, Square, Layers } from 'lucide-react';
 import { AppError, ToastType, Item } from '../types';
 import { api } from '../services/api';
 import { useAppContext } from '../context/AppContext';
@@ -406,7 +406,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
             disabled={isAnalyzing || globalIsLoading}
             className="bg-cyan-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-cyan-700 flex items-center justify-center gap-2 disabled:opacity-50 min-w-[140px]"
           >
-            {isAnalyzing ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />}
+            {isAnalyzing ? <LoaderCircle className="animate-spin" size={18} /> : <RefreshCw size={18} />}
             {isAnalyzing ? '解析中...' : '解析実行'}
           </button>
         </div>
@@ -509,7 +509,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
                      disabled:opacity-50 disabled:cursor-not-allowed
                    `}
                  >
-                   {importStatus === 'importing' ? <Loader2 className="animate-spin" size={20} /> : 
+                   {importStatus === 'importing' ? <LoaderCircle className="animate-spin" size={20} /> : 
                     importStatus === 'done' ? <Check size={20} /> : <Save size={20} />}
                    {importStatus === 'importing' ? 'チェック中...' : 
                     importStatus === 'done' ? '保存完了' : '確定して在庫登録'}
@@ -528,7 +528,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
                   disabled={isAnalyzing || globalIsLoading}
                   className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
                 >
-                  {isAnalyzing ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />}
+                  {isAnalyzing ? <LoaderCircle className="animate-spin" size={14} /> : <RefreshCw size={14} />}
                   再解析
                 </button>
               </div>
@@ -594,7 +594,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
                     <th className="p-3 w-10 text-center">
                       <button onClick={toggleSelectAll} className="text-slate-400 hover:text-cyan-600 transition-colors">
                         {selectedIds.size === scrapedItems.length && scrapedItems.length > 0
-                          ? <CheckSquare size={16} className="text-cyan-600" />
+                          ? <SquareCheckBig size={16} className="text-cyan-600" />
                           : <Square size={16} />
                         }
                       </button>
@@ -617,7 +617,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
                       >
                         <td className="p-3 text-center">
                           <button onClick={() => toggleSelect(item._tempId)} className="text-slate-400 hover:text-cyan-600 transition-colors">
-                            {isSelected ? <CheckSquare size={16} className="text-cyan-600" /> : <Square size={16} />}
+                            {isSelected ? <SquareCheckBig size={16} className="text-cyan-600" /> : <Square size={16} />}
                           </button>
                         </td>
                         <td className="p-3 text-center text-slate-400 font-mono text-xs">{idx + 1}</td>
@@ -673,7 +673,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
                               className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
                               title="削除"
                             >
-                              <Trash2 size={16} />
+                              <Trash size={16} />
                             </button>
                           </div>
                         </td>
@@ -703,7 +703,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
             <div className="p-6 border-b border-slate-200 flex justify-between items-center bg-slate-50 rounded-t-xl">
               <div className="flex items-center gap-3">
                  <div className="bg-amber-100 p-2 rounded-full text-amber-600">
-                    <AlertTriangle size={24} />
+                    <TriangleAlert size={24} />
                  </div>
                  <div>
                    <h3 className="text-xl font-bold text-slate-800">重複データが見つかりました</h3>

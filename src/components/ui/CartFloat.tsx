@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ShoppingCart, X, Loader2, Send, Minus, Plus, CheckCircle2, Copy, Check, AlertTriangle, ExternalLink } from 'lucide-react';
+import { ShoppingCart, X, LoaderCircle, Send, Minus, Plus, CircleCheck, Copy, Check, TriangleAlert, ExternalLink } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { api } from '@/services/api';
 import { useAppContext } from '@/context/AppContext';
@@ -41,7 +41,7 @@ export const CartFloat: React.FC = () => {
       <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
         <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
           <div className="p-5 text-center border-b border-slate-100">
-            <CheckCircle2 size={44} className="mx-auto text-green-500 mb-2" />
+            <CircleCheck size={44} className="mx-auto text-green-500 mb-2" />
             <h3 className="font-bold text-lg text-slate-800">リクエストを送信しました</h3>
           </div>
 
@@ -73,7 +73,7 @@ export const CartFloat: React.FC = () => {
             </div>
 
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 flex gap-2">
-              <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+              <TriangleAlert size={16} className="shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <p>このリンクを知っている人は誰でもリクエストを編集できます。<b>他の人には共有しないでください。</b></p>
                 <p>このブラウザでは、リクエスト一覧からそのまま編集できます。別の端末やブラウザで編集するときにリンクが必要です。</p>
@@ -262,7 +262,7 @@ export const CartFloat: React.FC = () => {
                   disabled={isSending || !requesterName.trim()}
                   className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white py-2 rounded-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  {isSending ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                  {isSending ? <LoaderCircle className="animate-spin" size={16} /> : <Send size={16} />}
                   送信する
                 </button>
               </div>

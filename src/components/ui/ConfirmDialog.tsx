@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { AlertTriangle, X } from 'lucide-react';
+import { TriangleAlert, X } from 'lucide-react';
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -64,7 +64,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       <div className={`bg-white rounded-xl shadow-xl max-w-md w-full border ${style.border}`}>
         <div className="flex items-center justify-between p-4 border-b border-slate-100">
           <div className="flex items-center gap-3">
-            <AlertTriangle className={style.icon} size={20} />
+            <TriangleAlert className={style.icon} size={20} />
             <h3 id="confirm-title" className="font-bold text-slate-800">{title}</h3>
           </div>
           <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 transition-colors">

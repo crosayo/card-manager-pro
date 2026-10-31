@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Check, AlertTriangle, Info, X, ChevronUp, ChevronDown, Copy } from 'lucide-react';
+import { Check, TriangleAlert, Info, X, ChevronUp, ChevronDown, Copy } from 'lucide-react';
 import { ToastType } from '@/types';
 
 interface ToastItemProps {
@@ -48,7 +48,7 @@ const ToastItem: React.FC<ToastItemProps> = ({ toast, onClose }) => {
       <div className="flex items-start gap-3">
         <div className={`mt-0.5 ${iconColor} shrink-0`}>
           {toast.type === 'success' && <Check size={20} />}
-          {toast.type === 'error' && <AlertTriangle size={20} />}
+          {toast.type === 'error' && <TriangleAlert size={20} />}
           {toast.type === 'info' && <Info size={20} />}
         </div>
         <div className="flex-1 min-w-0">

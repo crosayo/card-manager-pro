@@ -3,7 +3,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { LayoutDashboard, Layers, Package, AlertCircle, Info, Plus, X, Trash2, Calendar, Search, Megaphone, Bell, ArrowRight, Download, Database, Inbox } from 'lucide-react';
+import { LayoutDashboard, Layers, Package, CircleAlert, Info, Plus, X, Trash, Calendar, Search, Megaphone, Bell, ArrowRight, Download, Database, Inbox } from 'lucide-react';
 import { StatsWidget } from '../components/ui/StatsWidget';
 import { useAppContext } from '@/context/AppContext';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -111,7 +111,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ stats }) => {
         <StatsWidget
           label="欠品アラート"
           value={stats.lowStock.toLocaleString()}
-          icon={AlertCircle}
+          icon={CircleAlert}
           color="bg-rose-600"
           subtext="在庫1枚以下の重要項目"
         />
@@ -173,7 +173,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ stats }) => {
                       shrink-0 w-10 h-10 rounded-full flex items-center justify-center shadow-inner
                       ${item.type === 'alert' ? 'bg-rose-200 text-rose-700' : item.type === 'success' ? 'bg-emerald-200 text-emerald-700' : 'bg-slate-200 text-slate-600'}
                     `}>
-                      {item.type === 'alert' ? <AlertCircle size={20} /> : <Info size={20} />}
+                      {item.type === 'alert' ? <CircleAlert size={20} /> : <Info size={20} />}
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
@@ -200,7 +200,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ stats }) => {
                       className="absolute top-4 right-4 p-2 bg-white/80 hover:bg-rose-600 hover:text-white rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-all shadow-sm"
                       title="削除"
                     >
-                      <Trash2 size={16} />
+                      <Trash size={16} />
                     </button>
                   )}
                 </div>

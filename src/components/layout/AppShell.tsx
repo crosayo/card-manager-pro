@@ -3,7 +3,7 @@
 import React, { useState, Suspense } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Database, Menu, Loader2, Lock, LogIn, Clock } from 'lucide-react';
+import { Database, Menu, LoaderCircle, Lock, LogIn, Clock } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { ToastContainer } from '../ui/Toast';
 import { CartFloat } from '../ui/CartFloat';
@@ -26,7 +26,7 @@ export const AppShell = ({ children }: { children: React.ReactNode }) => {
   if (!isAuthReady || inviteStatus.state === 'checking') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-100">
-        <Loader2 className="animate-spin text-cyan-600" size={32} />
+        <LoaderCircle className="animate-spin text-cyan-600" size={32} />
       </div>
     );
   }

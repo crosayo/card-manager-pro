@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Package, Plus, Minus, X, Pencil, Trash2, Upload, Loader2, ShoppingCart, ImageOff, CheckCircle } from 'lucide-react';
+import { Package, Plus, Minus, X, Pencil, Trash, Upload, LoaderCircle, ShoppingCart, ImageOff, CircleCheckBig } from 'lucide-react';
 import { api } from '@/services/api';
 import { Supply, SUPPLY_CATEGORY_LABELS } from '@/types';
 import { useAppContext } from '@/context/AppContext';
@@ -231,7 +231,7 @@ export const SuppliesView: React.FC = () => {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="animate-spin text-cyan-600" size={32} />
+        <LoaderCircle className="animate-spin text-cyan-600" size={32} />
       </div>
     );
   }
@@ -332,7 +332,7 @@ export const SuppliesView: React.FC = () => {
                             className="w-7 h-7 bg-white/90 hover:bg-red-50 rounded-md flex items-center justify-center text-slate-600 hover:text-red-600 shadow"
                             title="削除"
                           >
-                            <Trash2 size={13} />
+                            <Trash size={13} />
                           </button>
                           <button
                             onClick={() => { setUploadTarget(supply); setImageFile(null); setImagePreview(supply.imageUrl ?? null); }}
@@ -385,7 +385,7 @@ export const SuppliesView: React.FC = () => {
                         }`}
                       >
                         {inCart ? (
-                          <><CheckCircle size={12} /> 追加済み ✓</>
+                          <><CircleCheckBig size={12} /> 追加済み ✓</>
                         ) : supply.stock === 0 ? (
                           '在庫なし'
                         ) : (
@@ -482,7 +482,7 @@ export const SuppliesView: React.FC = () => {
                         disabled={isUploading}
                         className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold flex items-center gap-1 disabled:opacity-50"
                       >
-                        {isUploading ? <Loader2 className="animate-spin" size={14} /> : <Upload size={14} />}
+                        {isUploading ? <LoaderCircle className="animate-spin" size={14} /> : <Upload size={14} />}
                         アップロード
                       </button>
                     )}
@@ -507,7 +507,7 @@ export const SuppliesView: React.FC = () => {
                   disabled={isSaving || !formData.name}
                   className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white py-2 rounded-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  {isSaving && <Loader2 className="animate-spin" size={16} />}
+                  {isSaving && <LoaderCircle className="animate-spin" size={16} />}
                   {editTarget ? '更新' : '追加'}
                 </button>
               </div>
@@ -544,7 +544,7 @@ export const SuppliesView: React.FC = () => {
                     disabled={isUploading}
                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold flex items-center gap-1 disabled:opacity-50"
                   >
-                    {isUploading ? <Loader2 className="animate-spin" size={14} /> : <Upload size={14} />}
+                    {isUploading ? <LoaderCircle className="animate-spin" size={14} /> : <Upload size={14} />}
                     アップロード
                   </button>
                 )}

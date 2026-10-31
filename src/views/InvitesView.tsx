@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link2, Loader2, Plus, Copy, Check, Ban, Trash2, Clock, Shield, CalendarPlus, RefreshCw, ChevronDown, ChevronRight, CheckSquare, Square, X, History } from 'lucide-react';
+import { Link2, LoaderCircle, Plus, Copy, Check, Ban, Trash, Clock, Shield, CalendarPlus, RefreshCw, ChevronDown, ChevronRight, SquareCheckBig, Square, X, RotateCcwClock } from 'lucide-react';
 import { Invite, InviteAccessLog } from '@/types';
 import { api } from '@/services/api';
 import { useAppContext } from '@/context/AppContext';
@@ -332,7 +332,7 @@ export const InvitesView: React.FC = () => {
           disabled={isCreating}
           className="bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 disabled:opacity-50"
         >
-          {isCreating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+          {isCreating ? <LoaderCircle size={16} className="animate-spin" /> : <Plus size={16} />}
           招待リンクを発行してコピー
         </button>
       </form>
@@ -359,7 +359,7 @@ export const InvitesView: React.FC = () => {
           >
             <Ban size={12} /> 取り消す
           </button>
-          {isBulkWorking && <Loader2 size={14} className="animate-spin" />}
+          {isBulkWorking && <LoaderCircle size={14} className="animate-spin" />}
           <button onClick={() => setSelectedIds([])} className="ml-auto text-slate-300 hover:text-white flex items-center gap-1 text-xs">
             <X size={14} /> 選択解除
           </button>
@@ -368,7 +368,7 @@ export const InvitesView: React.FC = () => {
 
       {/* 一覧 */}
       {isLoading ? (
-        <div className="flex justify-center py-12"><Loader2 className="animate-spin text-cyan-600" size={28} /></div>
+        <div className="flex justify-center py-12"><LoaderCircle className="animate-spin text-cyan-600" size={28} /></div>
       ) : sorted.length === 0 ? (
         <div className="bg-white rounded-xl p-10 text-center text-slate-400 border border-slate-200">発行した招待リンクはありません</div>
       ) : (
@@ -388,7 +388,7 @@ export const InvitesView: React.FC = () => {
                 <div className="flex flex-wrap items-center gap-2 mb-2">
                   {state !== 'revoked' && (
                     <button onClick={() => toggleSelect(invite.id)} className="text-slate-400 hover:text-slate-700" title="選択">
-                      {isSelected ? <CheckSquare size={18} className="text-slate-700" /> : <Square size={18} />}
+                      {isSelected ? <SquareCheckBig size={18} className="text-slate-700" /> : <Square size={18} />}
                     </button>
                   )}
                   <span className="font-bold text-slate-800">{invite.label || '名前なし'}</span>
@@ -471,12 +471,12 @@ export const InvitesView: React.FC = () => {
                 <div className="mt-3">
                   <button onClick={() => toggleLogs(invite)} className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1">
                     {openLogsId === invite.id ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                    <History size={12} /> アクセス履歴
+                    <RotateCcwClock size={12} /> アクセス履歴
                   </button>
                   {openLogsId === invite.id && (
                     <div className="mt-2 border-l border-slate-200 pl-3">
                       {isLoadingLogs && !logs ? (
-                        <div className="flex items-center gap-1 text-xs text-slate-400"><Loader2 size={12} className="animate-spin" /> 読み込み中...</div>
+                        <div className="flex items-center gap-1 text-xs text-slate-400"><LoaderCircle size={12} className="animate-spin" /> 読み込み中...</div>
                       ) : !logs || logs.length === 0 ? (
                         <p className="text-xs text-slate-400">アクセスの記録はありません</p>
                       ) : (
@@ -491,7 +491,7 @@ export const InvitesView: React.FC = () => {
                     onClick={() => handleDelete(invite)}
                     className="mt-2 text-xs text-slate-400 hover:text-red-500 flex items-center gap-1"
                   >
-                    <Trash2 size={12} /> 一覧から削除
+                    <Trash size={12} /> 一覧から削除
                   </button>
                 )}
               </div>

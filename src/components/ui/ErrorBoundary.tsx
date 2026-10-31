@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { TriangleAlert } from 'lucide-react';
 
 interface Props {
   children: React.ReactNode;
@@ -26,7 +26,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
         <div className="min-h-screen flex items-center justify-center bg-red-50 p-6">
           <div className="bg-white p-8 rounded-xl shadow-lg max-w-lg w-full border border-red-200">
             <div className="flex items-center gap-3 text-red-600 mb-4">
-              <AlertTriangle size={32} />
+              <TriangleAlert size={32} />
               <h1 className="text-xl font-bold">システムエラーが発生しました</h1>
             </div>
             <p className="text-slate-600 mb-4">予期せぬエラーによりアプリケーションが停止しました。</p>

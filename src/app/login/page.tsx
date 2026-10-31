@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { LogIn, Database, Loader2, AlertCircle } from 'lucide-react';
+import { LogIn, Database, LoaderCircle, CircleAlert } from 'lucide-react';
 import { api } from '../../services/api';
 
 export default function LoginPage() {
@@ -41,7 +41,7 @@ export default function LoginPage() {
 
         {error && (
           <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-6 flex items-start gap-2">
-            <AlertCircle size={18} className="shrink-0 mt-0.5" />
+            <CircleAlert size={18} className="shrink-0 mt-0.5" />
             <span>{error}</span>
           </div>
         )}
@@ -75,7 +75,7 @@ export default function LoginPage() {
             disabled={isLoading}
             className="w-full bg-cyan-600 text-white font-bold py-3 rounded-lg hover:bg-cyan-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {isLoading ? <Loader2 className="animate-spin" /> : <LogIn size={20} />}
+            {isLoading ? <LoaderCircle className="animate-spin" /> : <LogIn size={20} />}
             ログイン
           </button>
         </form>

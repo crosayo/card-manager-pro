@@ -7,7 +7,7 @@ import { InventoryList } from '@/views/InventoryList';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/services/api';
 import { Item, SortConfig } from '@/types';
-import { Loader2 } from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
 
 function InventoryPageContent() {
   const { isAdmin, handleLoginToggle, news, isLoading, addToast, setIsLoading, products, rarities, selectedRarities, setSelectedRarities, showOnlyInStock, setShowOnlyInStock } = useAppContext();
@@ -207,7 +207,7 @@ export default function InventoryPage() {
   return (
     <Suspense fallback={
       <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="animate-spin text-cyan-600" size={32} />
+        <LoaderCircle className="animate-spin text-cyan-600" size={32} />
       </div>
     }>
       <InventoryPageContent />

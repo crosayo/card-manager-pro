@@ -3,7 +3,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Eye, EyeOff, Search, Plus, Loader2, Filter, ArrowUpDown, Edit3, Trash2, X, Save, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, ExternalLink, Upload, ChevronsLeft, ChevronsRight, Calendar, ChevronDown, ShoppingCart, Check, Copy } from 'lucide-react';
+import { Eye, EyeOff, Search, Plus, LoaderCircle, Funnel, ArrowUpDown, PenLine, Trash, X, Save, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, ExternalLink, Upload, ChevronsLeft, ChevronsRight, Calendar, ChevronDown, ShoppingCart, Check, Copy } from 'lucide-react';
 import { Item, News, Product, SortConfig, AppError, ToastType } from '@/types';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/services/api';
@@ -432,7 +432,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                    title="CSVを読み込んで在庫を一括更新"
                    disabled={isImporting || isLoading}
                  >
-                   {isImporting ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+                   {isImporting ? <LoaderCircle size={18} className="animate-spin" /> : <Upload size={18} />}
                    <span className="hidden sm:inline">在庫更新(CSV)</span>
                  </button>
                  <input 
@@ -507,7 +507,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
                  }`}
                >
-                 <Filter size={14} />
+                 <Funnel size={14} />
                  <span>レアリティ</span>
                  {selectedRarities.length > 0 && (
                    <span className="bg-cyan-600 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center leading-none">
@@ -587,7 +587,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
         {/* フィルターチップバー: 適用中フィルターを表示 */}
         {(selectedCategory || selectedRarities.length > 0 || showOnlyInStock) && (
           <div className="flex flex-wrap gap-2 items-center pt-2 border-t border-slate-100">
-            <Filter size={14} className="text-slate-400 shrink-0" />
+            <Funnel size={14} className="text-slate-400 shrink-0" />
             {selectedCategory && (
               <button
                 onClick={() => router.push('/inventory')}
@@ -631,7 +631,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
       {isLoading && (
         <div className="fixed inset-0 bg-white/50 backdrop-blur-sm z-40 flex items-center justify-center pointer-events-none">
           <div className="bg-white p-4 rounded-lg shadow-xl flex items-center gap-3 border border-slate-200">
-            <Loader2 className="animate-spin text-cyan-600" size={24} />
+            <LoaderCircle className="animate-spin text-cyan-600" size={24} />
             <span className="font-bold text-slate-700">データを読み込み中...</span>
           </div>
         </div>
@@ -778,7 +778,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                             className="bg-slate-100 hover:bg-cyan-100 text-slate-400 hover:text-cyan-600 p-2 rounded transition-colors"
                             title="編集"
                           >
-                            <Edit3 size={18} />
+                            <PenLine size={18} />
                           </button>
                           <button
                             type="button"
@@ -786,7 +786,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                             className="bg-slate-100 hover:bg-red-100 text-slate-400 hover:text-red-600 p-2 rounded transition-colors"
                             title="削除"
                           >
-                            <Trash2 size={18} />
+                            <Trash size={18} />
                           </button>
                         </div>
                       )}
@@ -920,14 +920,14 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                      onClick={(e) => openEditModal(item, e)}
                      className="flex-1 py-2 text-sm text-slate-500 hover:text-cyan-600 hover:bg-slate-50 rounded flex items-center justify-center gap-1 active:bg-slate-100"
                    >
-                     <Edit3 size={16} /> 編集
+                     <PenLine size={16} /> 編集
                    </button>
                    <div className="w-px bg-slate-200 my-1"></div>
                    <button
                      onClick={(e) => handleDeleteClick(item.id, item.name, e)}
                      className="flex-1 py-2 text-sm text-slate-500 hover:text-red-600 hover:bg-red-50 rounded flex items-center justify-center gap-1 active:bg-red-100"
                    >
-                     <Trash2 size={16} /> 削除
+                     <Trash size={16} /> 削除
                    </button>
                  </div>
                )}
@@ -1009,7 +1009,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
           <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden">
             <div className="bg-slate-50 p-4 border-b border-slate-100 flex justify-between items-center">
               <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
-                {editingItem ? <Edit3 className="text-cyan-600" /> : <Plus className="text-cyan-600" />}
+                {editingItem ? <PenLine className="text-cyan-600" /> : <Plus className="text-cyan-600" />}
                 {editingItem ? 'カード情報を編集' : '新規カード登録'}
               </h3>
               <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">
@@ -1030,7 +1030,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                       value={cardSearchKeyword}
                       onChange={(e) => setCardSearchKeyword(e.target.value)}
                     />
-                    {isCardSearching && <Loader2 size={14} className="animate-spin text-slate-400 shrink-0" />}
+                    {isCardSearching && <LoaderCircle size={14} className="animate-spin text-slate-400 shrink-0" />}
                   </div>
                   {cardSearchResults.length > 0 && (
                     <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-10 max-h-56 overflow-y-auto">
@@ -1140,7 +1140,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                   disabled={isLoading}
                   className="px-6 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg font-bold flex items-center gap-2 disabled:opacity-50"
                 >
-                  {isLoading ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+                  {isLoading ? <LoaderCircle className="animate-spin" size={18} /> : <Save size={18} />}
                   {editingItem ? '更新する' : '登録する'}
                 </button>
               </div>

@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ShoppingBag, Loader2, ChevronDown, ChevronRight, Check, X, Edit3, Trash2, RefreshCw, Link2, Info, Undo2, AlertTriangle } from 'lucide-react';
+import { ShoppingBag, LoaderCircle, ChevronDown, ChevronRight, Check, X, PenLine, Trash, RefreshCw, Link2, Info, Undo2, TriangleAlert } from 'lucide-react';
 import { CardRequest, Item, RequestItem, RequestEditLog } from '@/types';
 import { api } from '@/services/api';
 import { useAppContext } from '@/context/AppContext';
@@ -516,7 +516,7 @@ export const RequestsView: React.FC = () => {
 
       {isLoading ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="animate-spin text-cyan-600" size={32} />
+          <LoaderCircle className="animate-spin text-cyan-600" size={32} />
         </div>
       ) : filtered.length === 0 ? (
         <div className="bg-white rounded-xl p-12 text-center text-slate-400 border border-slate-200">
@@ -555,7 +555,7 @@ export const RequestsView: React.FC = () => {
                   <div className="space-y-3">
                     {req.status === 'completed' && (
                       <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800 flex gap-2">
-                        <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                        <TriangleAlert size={14} className="shrink-0 mt-0.5" />
                         <p>完了済みのリクエストです。枚数の変更・削除・カードの変更は、<b>差分が在庫に自動で反映されます</b>。</p>
                       </div>
                     )}
@@ -604,7 +604,7 @@ export const RequestsView: React.FC = () => {
                               }`}
                               title={isRemoved ? '削除を取り消す' : 'このカードをリクエストから削除'}
                             >
-                              {isRemoved ? <><Undo2 size={12} /> 元に戻す</> : <><Trash2 size={12} /> 削除</>}
+                              {isRemoved ? <><Undo2 size={12} /> 元に戻す</> : <><Trash size={12} /> 削除</>}
                             </button>
                           </div>
                         </div>
@@ -614,7 +614,7 @@ export const RequestsView: React.FC = () => {
                           <div className="ml-2 p-2 bg-cyan-50 border border-cyan-200 rounded-lg text-xs">
                             {isLoadingSwap ? (
                               <div className="flex items-center gap-1 text-slate-400 py-1">
-                                <Loader2 size={12} className="animate-spin" /> 読み込み中...
+                                <LoaderCircle size={12} className="animate-spin" /> 読み込み中...
                               </div>
                             ) : swapAlternatives.length === 0 ? (
                               <p className="text-slate-400 py-1">他のバリアントはありません</p>
@@ -666,7 +666,7 @@ export const RequestsView: React.FC = () => {
                         disabled={isUpdating || ((req.items?.length ?? 0) > 0 && removedItemIds.length >= (req.items?.length ?? 0))}
                         className="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded text-sm font-bold flex items-center gap-1 disabled:opacity-50"
                       >
-                        {isUpdating ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                        {isUpdating ? <LoaderCircle size={14} className="animate-spin" /> : <Check size={14} />}
                         更新する
                       </button>
                     </div>
@@ -750,7 +750,7 @@ export const RequestsView: React.FC = () => {
                       onClick={() => handleDelete(req)}
                       className="px-3 py-1.5 text-sm text-red-500 hover:bg-red-50 border border-red-200 rounded flex items-center gap-1 mr-auto"
                     >
-                      <Trash2 size={14} /> 削除
+                      <Trash size={14} /> 削除
                     </button>
                   )}
 
@@ -771,7 +771,7 @@ export const RequestsView: React.FC = () => {
                       onClick={() => startEdit(req)}
                       className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-200 bg-slate-100 rounded flex items-center gap-1"
                     >
-                      <Edit3 size={14} /> 編集
+                      <PenLine size={14} /> 編集
                     </button>
                   )}
 
@@ -781,7 +781,7 @@ export const RequestsView: React.FC = () => {
                       onClick={() => startEdit(req)}
                       className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-200 bg-slate-100 rounded flex items-center gap-1"
                     >
-                      <Edit3 size={14} /> 編集
+                      <PenLine size={14} /> 編集
                     </button>
                   )}
 
@@ -793,7 +793,7 @@ export const RequestsView: React.FC = () => {
                           onClick={() => startEdit(req)}
                           className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-200 bg-slate-100 rounded flex items-center gap-1"
                         >
-                          <Edit3 size={14} /> 編集
+                          <PenLine size={14} /> 編集
                         </button>
                       )}
                       <button
@@ -876,7 +876,7 @@ export const RequestsView: React.FC = () => {
                   disabled={isUpdating}
                   className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  {isUpdating ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                  {isUpdating ? <LoaderCircle size={16} className="animate-spin" /> : <Check size={16} />}
                   確定する
                 </button>
               </div>

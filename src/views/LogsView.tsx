@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { ScrollText, Loader2, ExternalLink, X, CalendarDays, Layers } from 'lucide-react';
+import { ScrollText, LoaderCircle, ExternalLink, X, CalendarDays, Layers } from 'lucide-react';
 import { StockLog } from '@/types';
 import { api } from '@/services/api';
 import { RARITY_STYLES, RARITY_DEFAULT_STYLE } from '@/constants';
@@ -164,7 +164,7 @@ export const LogsView: React.FC = () => {
 
       {isLoading ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="animate-spin text-cyan-600" size={32} />
+          <LoaderCircle className="animate-spin text-cyan-600" size={32} />
         </div>
       ) : filtered.length === 0 ? (
         <div className="bg-white rounded-xl p-12 text-center text-slate-400 border border-slate-200">

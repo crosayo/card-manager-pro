@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Product } from '../types';
-import { Menu, Plus, Edit3, Trash2, X, Save, Eye, EyeOff } from 'lucide-react';
+import { Menu, Plus, PenLine, Trash, X, Save, Eye, EyeOff } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 
@@ -115,13 +115,13 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ products }) => {
                         onClick={() => openEditModal(p)}
                         className="p-2 text-slate-400 hover:text-cyan-600 hover:bg-cyan-50 rounded transition-colors"
                       >
-                        <Edit3 size={18} />
+                        <PenLine size={18} />
                       </button>
                       <button 
                         onClick={() => handleDelete(p.id, p.name)}
                         className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
                       >
-                        <Trash2 size={18} />
+                        <Trash size={18} />
                       </button>
                     </div>
                   </td>

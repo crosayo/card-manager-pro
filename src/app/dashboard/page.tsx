@@ -3,7 +3,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { DashboardView } from '@/views/DashboardView';
-import { Loader2 } from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
 import { api } from '@/services/api';
 
 export default function DashboardPage() {
@@ -37,7 +37,7 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
-        <Loader2 className="animate-spin text-cyan-600" size={32} />
+        <LoaderCircle className="animate-spin text-cyan-600" size={32} />
       </div>
     );
   }
