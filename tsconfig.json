@@ -28,7 +28,7 @@
     "src/**/*.tsx",
     ".next/types/**/*.ts",
     "tailwind.config.ts",
-    "next.config.mjs"
+    "next.config.ts"
   ],
   "exclude": ["node_modules", "app", "components", "views"]
 }
