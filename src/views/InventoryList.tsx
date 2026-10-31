@@ -194,13 +194,15 @@ export const InventoryList: React.FC<InventoryListProps> = ({
     try {
       const BOM = '\uFEFF';
       const headers = ['ID', 'カード名', '型番', 'レアリティ', '在庫数', '収録パック', '発売日', '最終更新日'];
+      // 文字列は引用符で囲む。= + - @ などで始まる値は Excel が数式として扱うため、先頭に ' を付けて文字列にする
+      const text = (v: string) => `"${(/^[=+\-@\t\r]/.test(v) ? `'${v}` : v).replace(/"/g, '""')}"`;
       const rows = items.map(item => [
         item.id,
-        `"${item.name.replace(/"/g, '""')}"`,
-        item.cardId,
-        item.rarity,
+        text(item.name),
+        text(item.cardId),
+        text(item.rarity),
         item.stock,
-        `"${item.category.replace(/"/g, '""')}"`,
+        text(item.category),
         getReleaseDate(item.category),
         item.updatedAt
       ]);
@@ -258,7 +260,8 @@ export const InventoryList: React.FC<InventoryListProps> = ({
           throw new Error('ヘッダー行に「ID」「在庫数」列が見つかりませんでした。CSVの形式を確認してください。');
         }
 
-        const updates: { id: number, stock: number }[] = [];
+        // 同じIDが複数行ある場合は最後の行を使う（両方更新すると在庫ログの増減が二重になるため）
+        const updatesById = new Map<number, number>();
         let failCount = 0;
 
         for (let i = 1; i < rows.length; i++) {
@@ -271,16 +274,18 @@ export const InventoryList: React.FC<InventoryListProps> = ({
           const stockStr = cols[stockColIndex]?.replace(/"/g, '').trim();
 
           if (idStr && stockStr) {
-            const id = parseInt(idStr);
-            const stock = parseInt(stockStr);
-            if (!isNaN(id) && !isNaN(stock)) {
-              updates.push({ id, stock });
+            const id = Number(idStr);
+            const stock = Number(stockStr);
+            // 在庫数は0以上の整数のみ（DBに制約がないため、マイナスや小数はここで不正として扱う）
+            if (Number.isInteger(id) && Number.isInteger(stock) && stock >= 0) {
+              updatesById.set(id, stock);
             } else {
               failCount++;
             }
           }
         }
 
+        const updates = Array.from(updatesById, ([id, stock]) => ({ id, stock }));
         if (updates.length > 0) {
           const result = await api.bulkUpdateStock(updates);
           const summary = [
@@ -362,7 +367,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
     e.stopPropagation();
     e.preventDefault();
     const query = encodeURIComponent(`遊戯王 ${name}`);
-    window.open(`https://www.google.com/search?tbm=isch&q=${query}`, '_blank');
+    window.open(`https://www.google.com/search?tbm=isch&q=${query}`, '_blank', 'noopener,noreferrer');
   };
 
   // Pagination Handlers

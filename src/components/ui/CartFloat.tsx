@@ -11,7 +11,7 @@ import { getErrorMessage } from '@/utils';
 
 export const CartFloat: React.FC = () => {
   const { cartItems, removeFromCart, updateQuantity, clearCart, totalCount } = useCart();
-  const { addToast } = useAppContext();
+  const { addToast, isAdmin, refreshPendingRequestsCount } = useAppContext();
   const [isOpen, setIsOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [requesterName, setRequesterName] = useState('');
@@ -120,6 +120,7 @@ export const CartFloat: React.FC = () => {
         })),
       });
       await api.sendDiscordNotification(request);
+      if (isAdmin) refreshPendingRequestsCount();
       clearCart();
       setIsModalOpen(false);
       setIsOpen(false);

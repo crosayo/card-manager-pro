@@ -1097,8 +1097,17 @@ export const api = {
     if (params?.priceTotal !== undefined) updates.price_total = params.priceTotal;
     if (params?.adminMemo !== undefined) updates.admin_memo = params.adminMemo;
 
-    const { error } = await supabase.from('requests').update(updates).eq('id', requestId);
+    // 受付中のときだけ更新する（別のタブなどで先に処理されていたら、在庫の二重減算を防ぐため止める）
+    const { data: updated, error } = await supabase
+      .from('requests')
+      .update(updates)
+      .eq('id', requestId)
+      .eq('status', 'pending')
+      .select('id');
     if (error) handleSupabaseError(error, 'updateRequestStatus');
+    if (!updated || updated.length === 0) {
+      throw new Error('このリクエストはすでに処理済みです。画面を再読み込みして状態を確認してください。');
+    }
 
     // 単価を更新
     if (params?.unitPrices) {
