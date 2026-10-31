@@ -71,6 +71,14 @@ export const RequestsView: React.FC = () => {
   const [swapAlternatives, setSwapAlternatives] = useState<Item[]>([]);
   const [isLoadingSwap, setIsLoadingSwap] = useState(false);
 
+  // 変更パネル（管理者用）: 枚数と変更先（今のカード・同名の別型番・別レアリティ）をまとめて選ぶ
+  const [changingItemId, setChangingItemId] = useState<number | null>(null);
+  const [changeOptions, setChangeOptions] = useState<Item[]>([]);
+  const [changePending, setChangePending] = useState<Record<number, number>>({});
+  const [changeTargetId, setChangeTargetId] = useState<number | null>(null);
+  const [changeQuantity, setChangeQuantity] = useState(1);
+  const [isLoadingChange, setIsLoadingChange] = useState(false);
+
   // 完了モーダル状態（管理者用）
   const [completingRequest, setCompletingRequest] = useState<CardRequest | null>(null);
   const [unitPrices, setUnitPrices] = useState<Record<number, number>>({});
@@ -185,6 +193,7 @@ export const RequestsView: React.FC = () => {
     setRemovedItemIds([]);
     setSwappingItemId(null);
     setSwapAlternatives([]);
+    setChangingItemId(null);
   };
 
   const toggleRemoveItem = (riId: number) => {
@@ -193,6 +202,7 @@ export const RequestsView: React.FC = () => {
       setSwappingItemId(null);
       setSwapAlternatives([]);
     }
+    if (changingItemId === riId) setChangingItemId(null);
   };
 
   // 完了済みリクエストの編集時: 完了時に減らした在庫との差分を在庫へ反映する（管理者のみ）
@@ -299,6 +309,85 @@ export const RequestsView: React.FC = () => {
       }
     } catch (e) {
       addToast('error', '変更失敗', getErrorMessage(e));
+    }
+  };
+
+  const closeChange = () => {
+    setChangingItemId(null);
+    setChangeOptions([]);
+  };
+
+  // 変更パネルを開く。同名のカードを全て取得し、今のカードを先頭に、残りを型番 → レアリティ順に並べる
+  const openChange = async (ri: RequestItem) => {
+    if (!ri.item || changingItemId === ri.id) { closeChange(); return; }
+    setSwappingItemId(null);
+    setChangingItemId(ri.id);
+    setChangeTargetId(ri.item.id);
+    setChangeQuantity(editQuantities[ri.id] ?? ri.quantity);
+    setIsLoadingChange(true);
+    try {
+      const [all, pending] = await Promise.all([
+        api.fetchItemsByName(ri.item.name),
+        api.fetchPendingQuantities(),
+      ]);
+      const rarityMap = new Map(rarities.map((r, i) => [r, i]));
+      const others = all
+        .filter(a => a.id !== ri.item!.id)
+        .sort((a, b) => a.cardId.localeCompare(b.cardId) || (rarityMap.get(a.rarity) ?? 999) - (rarityMap.get(b.rarity) ?? 999));
+      setChangeOptions([all.find(a => a.id === ri.item!.id) ?? ri.item, ...others]);
+      setChangePending(pending);
+    } catch (e) {
+      addToast('error', '候補の取得に失敗しました', getErrorMessage(e));
+      closeChange();
+    } finally {
+      setIsLoadingChange(false);
+    }
+  };
+
+  // 変更パネルの内容をすぐに保存する（カードの差し替え・枚数変更・編集履歴、完了済みなら在庫の差分も反映）
+  const applyChange = async (req: CardRequest, ri: RequestItem) => {
+    const target = changeOptions.find(o => o.id === changeTargetId);
+    if (!ri.item || !target) return;
+    const quantity = Math.max(1, changeQuantity);
+    const isSwap = target.id !== ri.item.id;
+    if (!isSwap && quantity === ri.quantity) { closeChange(); return; }
+    setIsUpdating(true);
+    try {
+      const oldLabel = `${ri.item.name} ${ri.item.cardId} ${ri.item.rarity}`;
+      const newLabel = `${target.name} ${target.cardId} ${target.rarity}`;
+      if (isSwap) {
+        await api.swapRequestItem(ri.id, target.id);
+        await api.addRequestEditLog({ requestId: req.id, editorName: '管理者', fieldChanged: 'カード変更', oldValue: oldLabel, newValue: newLabel })
+          .catch(e => console.warn('ログ記録失敗:', e));
+      }
+      if (quantity !== ri.quantity) {
+        await api.editRequestAsAdmin(req.id, { itemChanges: [{ requestItemId: ri.id, quantity }] });
+        await api.addRequestEditLog({ requestId: req.id, editorName: '管理者', fieldChanged: '数量', oldValue: `${ri.item.name}: ${ri.quantity}枚`, newValue: `${target.name}: ${quantity}枚` })
+          .catch(e => console.warn('ログ記録失敗:', e));
+      }
+      // 完了済みなら、元のカードの在庫を戻し、変更先の在庫を減らす（同じカードなら枚数の差分だけ）
+      let stockFailures: string[] = [];
+      if (req.status === 'completed') {
+        const adjustments: StockAdjustment[] = isSwap
+          ? [{ itemId: ri.item.id, delta: ri.quantity, label: oldLabel }, { itemId: target.id, delta: -quantity, label: newLabel }]
+          : [{ itemId: ri.item.id, delta: ri.quantity - quantity, label: oldLabel }];
+        stockFailures = await applyStockAdjustments(req.id, adjustments, '完了済みリクエストの編集');
+      }
+      const updated = await api.fetchRequestById(req.id, { includeToken: true });
+      setRequests(prev => prev.map(r => r.id === req.id ? updated : r));
+      setEditQuantities(prev => ({ ...prev, [ri.id]: quantity }));
+      setLogsCache(prev => { const next = { ...prev }; delete next[req.id]; return next; });
+      setExpandedLogs(prev => ({ ...prev, [req.id]: false }));
+      closeChange();
+      if (stockFailures.length > 0) {
+        notifyStockFailures(stockFailures);
+      } else {
+        addToast('success', '変更しました', `${newLabel} / ${quantity}枚`);
+      }
+    } catch (e) {
+      addToast('error', '変更失敗', getErrorMessage(e));
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -590,14 +679,17 @@ export const RequestsView: React.FC = () => {
                                 <span className={`px-1.5 py-0.5 rounded text-[11px] font-bold border ${getRarityStyle(ri.item.rarity)}`}>
                                   {ri.item.rarity}
                                 </span>
-                                <button
-                                  type="button"
-                                  onClick={() => openSwap(ri)}
-                                  className="text-[11px] text-cyan-500 hover:text-cyan-700 hover:underline flex items-center gap-0.5"
-                                >
-                                  <RefreshCw size={10} />
-                                  別バリアント
-                                </button>
+                                {/* 管理者は削除ボタン横の「変更」を使う */}
+                                {!isAdmin && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openSwap(ri)}
+                                    className="text-[11px] text-cyan-500 hover:text-cyan-700 hover:underline flex items-center gap-0.5"
+                                  >
+                                    <RefreshCw size={10} />
+                                    別バリアント
+                                  </button>
+                                )}
                               </div>
                             )}
                           </div>
@@ -608,6 +700,20 @@ export const RequestsView: React.FC = () => {
                                 <span className="w-8 text-center font-bold">{editQuantities[ri.id] ?? ri.quantity}</span>
                                 <button onClick={() => setEditQuantities(prev => ({ ...prev, [ri.id]: (prev[ri.id] ?? ri.quantity) + 1 }))} className="w-7 h-7 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center">+</button>
                               </>
+                            )}
+                            {isAdmin && ri.item && !isRemoved && (
+                              <button
+                                type="button"
+                                onClick={() => openChange(ri)}
+                                className={`px-2 h-7 rounded text-xs font-bold flex items-center gap-1 border ${
+                                  changingItemId === ri.id
+                                    ? 'bg-cyan-600 text-white border-cyan-600'
+                                    : 'bg-white text-cyan-600 border-cyan-200 hover:bg-cyan-50'
+                                }`}
+                                title="枚数の調整・同名の別型番／別レアリティへの変更"
+                              >
+                                <RefreshCw size={12} /> 変更
+                              </button>
                             )}
                             <button
                               type="button"
@@ -651,6 +757,76 @@ export const RequestsView: React.FC = () => {
                                   </button>
                                 ))}
                               </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* 変更パネル（管理者用） */}
+                        {changingItemId === ri.id && (
+                          <div className="ml-2 p-3 bg-cyan-50 border border-cyan-200 rounded-lg text-xs space-y-3">
+                            {isLoadingChange ? (
+                              <div className="flex items-center gap-1 text-slate-400 py-1">
+                                <LoaderCircle size={12} className="animate-spin" /> 読み込み中...
+                              </div>
+                            ) : (
+                              <>
+                                <div className="space-y-1">
+                                  <p className="text-slate-500 font-bold">変更先（同名のカード）</p>
+                                  {changeOptions.map(opt => {
+                                    const isCurrent = opt.id === ri.item?.id;
+                                    // 他のリクエストで受付中の枚数（今のカードは、このリクエストが受付中ならその分を除く）
+                                    const pending = Math.max(0, (changePending[opt.id] ?? 0) - (isCurrent && req.status === 'pending' ? ri.quantity : 0));
+                                    // 出せる枚数。完了済みの今のカードは、完了時に減らした分が戻る前提で足す
+                                    const available = opt.stock - pending + (isCurrent && req.status === 'completed' ? ri.quantity : 0);
+                                    const isShort = available < changeQuantity;
+                                    return (
+                                      <label
+                                        key={opt.id}
+                                        className={`flex items-center gap-2 px-2 py-1.5 rounded border cursor-pointer transition-colors ${
+                                          changeTargetId === opt.id ? 'bg-white border-cyan-400' : 'border-transparent hover:bg-white hover:border-cyan-200'
+                                        }`}
+                                      >
+                                        <input
+                                          type="radio"
+                                          name={`change-${ri.id}`}
+                                          checked={changeTargetId === opt.id}
+                                          onChange={() => setChangeTargetId(opt.id)}
+                                          className="accent-cyan-600"
+                                        />
+                                        <span className={`px-1.5 py-0.5 rounded font-bold border ${getRarityStyle(opt.rarity)}`}>{opt.rarity}</span>
+                                        <span className="font-mono text-slate-500">{opt.cardId}</span>
+                                        {isCurrent && <span className="text-slate-400">（今のカード）</span>}
+                                        <span className={`ml-auto text-right ${isShort ? 'text-red-600 font-bold' : 'text-slate-500'}`}>
+                                          在庫 {opt.stock}{pending > 0 ? ` / 他で受付中 ${pending}` : ''}
+                                          {isShort && <span className="block text-[10px]">足りません</span>}
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                  {changeOptions.length <= 1 && <p className="text-slate-400">同名の別型番・別レアリティは登録されていません。</p>}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-slate-500 font-bold">枚数</span>
+                                  <button type="button" onClick={() => setChangeQuantity(q => Math.max(1, q - 1))} className="w-7 h-7 bg-white border border-slate-200 hover:bg-slate-50 rounded flex items-center justify-center">-</button>
+                                  <span className="w-8 text-center font-bold text-sm">{changeQuantity}</span>
+                                  <button type="button" onClick={() => setChangeQuantity(q => q + 1)} className="w-7 h-7 bg-white border border-slate-200 hover:bg-slate-50 rounded flex items-center justify-center">+</button>
+                                </div>
+                                {req.status === 'completed' && (
+                                  <p className="text-amber-700">完了済みのため、変更すると在庫の差分が自動で反映されます。</p>
+                                )}
+                                <div className="flex justify-end gap-2">
+                                  <button type="button" onClick={closeChange} className="px-3 py-1.5 text-slate-600 hover:bg-white rounded">閉じる</button>
+                                  <button
+                                    type="button"
+                                    onClick={() => applyChange(req, ri)}
+                                    disabled={isUpdating}
+                                    className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded font-bold flex items-center gap-1 disabled:opacity-50"
+                                  >
+                                    {isUpdating ? <LoaderCircle size={12} className="animate-spin" /> : <Check size={12} />}
+                                    この内容で変更
+                                  </button>
+                                </div>
+                              </>
                             )}
                           </div>
                         )}
@@ -699,6 +875,12 @@ export const RequestsView: React.FC = () => {
                                 <span className={`px-1.5 py-0.5 rounded text-[11px] font-bold border ${getRarityStyle(ri.item.rarity)}`}>
                                   {ri.item.rarity}
                                 </span>
+                                {/* 受付中で在庫が足りないカード。管理者は「編集 → 変更」で別型番・別レアリティに変えられる */}
+                                {isAdmin && req.status === 'pending' && ri.item.stock < ri.quantity && (
+                                  <span className="px-1.5 py-0.5 rounded text-[11px] font-bold bg-red-50 text-red-600 border border-red-200">
+                                    在庫不足（在庫 {ri.item.stock}）
+                                  </span>
+                                )}
                               </div>
                             )}
                           </div>
