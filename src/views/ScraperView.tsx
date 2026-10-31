@@ -7,6 +7,7 @@ import { AppError, ToastType, Item } from '../types';
 import { api } from '../services/api';
 import { useAppContext } from '../context/AppContext';
 import { normalizeCardName, normalizeForStorage, getErrorMessage } from '../utils';
+import { PageContainer, PageHeader } from '@/components/layout/Page';
 
 interface ScraperViewProps {
   isLoading: boolean;
@@ -380,10 +381,8 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
   const sortedProducts = [...products].sort((a, b) => new Date(b.releaseDate).getTime() - new Date(a.releaseDate).getTime());
 
   return (
-    <div className="p-4 md:p-8 max-w-6xl mx-auto pb-24">
-      <h2 className="text-2xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-        <Download /> Wiki取込
-      </h2>
+    <PageContainer>
+      <PageHeader icon={Download} title="Wiki取込" />
 
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8">
         <div className="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6 text-sm text-blue-800">
@@ -588,7 +587,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm whitespace-nowrap">
-                <thead className="bg-slate-100 text-slate-500 font-medium border-b border-slate-200">
+                <thead className="bg-slate-50 text-slate-500 text-xs font-bold border-b border-slate-200">
                   <tr>
                     <th className="p-3 w-10 text-center">
                       <button onClick={toggleSelectAll} className="text-slate-400 hover:text-cyan-600 transition-colors">
@@ -705,7 +704,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
                     <TriangleAlert size={24} />
                  </div>
                  <div>
-                   <h3 className="text-xl font-bold text-slate-800">重複データが見つかりました</h3>
+                   <h3 className="text-lg font-bold text-slate-800">重複データが見つかりました</h3>
                    <p className="text-sm text-slate-500">データベースに既に存在するカードが {conflicts.length} 件あります。</p>
                  </div>
               </div>
@@ -783,6 +782,6 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
           </div>
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 };

@@ -5,6 +5,7 @@ import { Product } from '../types';
 import { Menu, Plus, PenLine, Trash, X, Save, Eye, EyeOff } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { PageContainer, PageHeader } from '@/components/layout/Page';
 
 interface ProductsViewProps {
   products: Product[];
@@ -69,24 +70,21 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ products }) => {
   }
 
   return (
-    <div className="p-4 md:p-8 max-w-5xl mx-auto pb-24">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-          <Menu /> 製品マスタ管理
-        </h2>
+    <PageContainer narrow>
+      <PageHeader icon={Menu} title="製品マスタ管理">
         <button 
           onClick={openAddModal}
           className="bg-cyan-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-cyan-700 flex items-center gap-2 shadow-sm"
         >
           <Plus size={18} /> 新規製品追加
         </button>
-      </div>
+      </PageHeader>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-sm font-medium">
+              <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs font-bold">
                 <th className="p-4 w-32">発売日</th>
                 <th className="p-4">製品名 (パック名)</th>
                 <th className="p-4 w-24 text-center">表示</th>
@@ -136,7 +134,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ products }) => {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
             <div className="bg-slate-50 p-4 border-b border-slate-100 flex justify-between items-center">
-              <h3 className="font-bold text-lg text-slate-800">
+              <h3 className="text-lg font-bold text-slate-800">
                 {editingProduct ? '製品情報を編集' : '新規製品登録'}
               </h3>
               <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">
@@ -215,6 +213,6 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ products }) => {
         }}
         onCancel={() => setDeleteTarget(null)}
       />
-    </div>
+    </PageContainer>
   );
 };

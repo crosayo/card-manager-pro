@@ -11,6 +11,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { RARITY_STYLES, RARITY_DEFAULT_STYLE } from '@/constants';
 import { buildRequestEditUrl, getSavedRequestTokens, saveRequestToken } from '@/lib/requestTokens';
 import { getErrorMessage } from '@/utils';
+import { PageContainer, PageHeader } from '@/components/layout/Page';
 
 const STATUS_LABELS: Record<CardRequest['status'], string> = {
   pending: '受付中',
@@ -479,12 +480,8 @@ export const RequestsView: React.FC = () => {
   };
 
   return (
-    <div className="p-4 md:p-8 pb-20">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-          <ShoppingBag /> リクエスト一覧
-        </h2>
-      </div>
+    <PageContainer>
+      <PageHeader icon={ShoppingBag} title="リクエスト一覧" />
 
       {/* フィルター */}
       {isAdmin ? (
@@ -830,7 +827,7 @@ export const RequestsView: React.FC = () => {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full">
             <div className="p-4 border-b border-slate-100 bg-slate-50 rounded-t-xl flex justify-between items-center">
-              <h3 className="font-bold text-slate-800">完了処理: {completingRequest.requesterName}</h3>
+              <h3 className="text-lg font-bold text-slate-800">完了処理: {completingRequest.requesterName}</h3>
               <button onClick={() => setCompletingRequest(null)} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
             </div>
             <div className="p-5 space-y-4">
@@ -901,6 +898,6 @@ export const RequestsView: React.FC = () => {
         onConfirm={confirmDialog.onConfirm}
         onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
       />
-    </div>
+    </PageContainer>
   );
 };

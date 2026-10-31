@@ -53,7 +53,7 @@ export const QuantityDialog: React.FC<QuantityDialogProps> = ({
         <div className="flex items-center justify-between p-4 border-b border-slate-100">
           <div className="flex items-center gap-3 min-w-0">
             <ShoppingCart className="text-cyan-500 shrink-0" size={20} />
-            <h3 id="quantity-title" className="font-bold text-slate-800">{isUpdate ? 'カートの枚数を変更' : '枚数を選んでカートへ'}</h3>
+            <h3 id="quantity-title" className="text-lg font-bold text-slate-800">{isUpdate ? 'カートの枚数を変更' : '枚数を選んでカートへ'}</h3>
           </div>
           <button type="button" onClick={onCancel} className="text-slate-400 hover:text-slate-600 transition-colors" aria-label="閉じる">
             <X size={18} />

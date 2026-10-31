@@ -43,7 +43,7 @@ export const CartFloat: React.FC = () => {
         <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
           <div className="p-5 text-center border-b border-slate-100">
             <CircleCheck size={44} className="mx-auto text-green-500 mb-2" />
-            <h3 className="font-bold text-lg text-slate-800">リクエストを送信しました</h3>
+            <h3 className="text-lg font-bold text-slate-800">リクエストを送信しました</h3>
           </div>
 
           <div className="p-5 space-y-4">
@@ -209,7 +209,7 @@ export const CartFloat: React.FC = () => {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
             <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-xl">
-              <h3 className="font-bold text-slate-800 flex items-center gap-2">
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                 <Send size={18} className="text-cyan-600" /> リクエスト送信
               </h3>
               <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">

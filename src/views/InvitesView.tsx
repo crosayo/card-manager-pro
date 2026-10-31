@@ -9,6 +9,7 @@ import { useAppContext } from '@/context/AppContext';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { buildInviteUrl } from '@/lib/invite';
 import { getErrorMessage } from '@/utils';
+import { PageContainer, PageHeader } from '@/components/layout/Page';
 
 // 有効期間の選択肢（日数）
 const PERIODS: { days: number; label: string }[] = [
@@ -281,14 +282,15 @@ export const InvitesView: React.FC = () => {
   });
 
   return (
-    <div className="p-4 md:p-8 pb-20 max-w-4xl">
-      <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2 mb-2">
-        <Link2 /> 招待リンク
-      </h2>
-      <p className="text-sm text-slate-500 mb-6">
-        ログインしていない人は、有効な招待リンクを開いた場合だけ在庫の閲覧とリクエストができます。
-        アクセスのたびに日時・IPアドレス・端末の種類を記録します（90日間）。
-      </p>
+    <PageContainer narrow>
+      <PageHeader
+        icon={Link2}
+        title="招待リンク"
+        description={<>
+          ログインしていない人は、有効な招待リンクを開いた場合だけ在庫の閲覧とリクエストができます。
+          アクセスのたびに日時・IPアドレス・端末の種類を記録します（90日間）。
+        </>}
+      />
 
       {/* 発行フォーム */}
       <form onSubmit={handleCreate} className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 mb-6 space-y-4">
@@ -510,7 +512,7 @@ export const InvitesView: React.FC = () => {
         onConfirm={confirmDialog.onConfirm}
         onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
       />
-    </div>
+    </PageContainer>
   );
 };
 

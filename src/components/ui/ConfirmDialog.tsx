@@ -71,7 +71,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         <div className="flex items-center justify-between p-4 border-b border-slate-100">
           <div className="flex items-center gap-3">
             <TriangleAlert className={style.icon} size={20} />
-            <h3 id="confirm-title" className="font-bold text-slate-800">{title}</h3>
+            <h3 id="confirm-title" className="text-lg font-bold text-slate-800">{title}</h3>
           </div>
           <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 transition-colors">
             <X size={18} />

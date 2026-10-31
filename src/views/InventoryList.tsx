@@ -3,7 +3,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Eye, Search, Plus, LoaderCircle, Funnel, ArrowUpDown, PenLine, Trash, X, Save, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Upload, ChevronsLeft, ChevronsRight, Calendar, ChevronDown, ShoppingCart, Check, Copy } from 'lucide-react';
+import { Eye, Layers, Search, Plus, LoaderCircle, Funnel, ArrowUpDown, PenLine, Trash, X, Save, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Upload, ChevronsLeft, ChevronsRight, Calendar, ChevronDown, ShoppingCart, Check, Copy } from 'lucide-react';
 import { Item, News, Product, SortConfig, AppError, ToastType } from '@/types';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/services/api';
@@ -12,6 +12,7 @@ import { RARITY_STYLES, RARITY_DEFAULT_STYLE } from '@/constants';
 import { useCart } from '@/context/CartContext';
 import { useQuantityDialog } from '@/components/ui/QuantityDialog';
 import { getErrorMessage } from '@/utils';
+import { PageContainer, PageHeader } from '@/components/layout/Page';
 
 interface InventoryListProps {
   isAdmin: boolean;
@@ -378,8 +379,9 @@ export const InventoryList: React.FC<InventoryListProps> = ({
   };
 
   return (
-    <div className="p-4 md:p-8 pb-20">
+    <PageContainer>
       {quantityDialog.dialog}
+      <PageHeader icon={Layers} title="在庫一覧" description={selectedCategory ? `収録パック: ${selectedCategory}` : undefined} />
       {/* 閲覧専用バナー */}
       {!isAdmin && (
         <div className="bg-blue-600 text-white px-4 md:px-6 py-3 rounded-lg shadow-md mb-6 flex flex-col md:flex-row items-center justify-between gap-3">
@@ -655,7 +657,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
       <div className="hidden md:block bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200 overflow-x-auto relative z-0">
         <table className="w-full text-left border-collapse min-w-[700px]">
           <thead>
-            <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-sm uppercase tracking-wider">
+            <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs font-bold tracking-wider">
               {['releaseDate', 'cardId', 'name', 'rarity', 'stock', 'category'].map((key) => (
                 <th key={key} className="p-4 cursor-pointer hover:bg-slate-100 transition-colors group" onClick={() => handleSort(key as SortConfig['key'])}>
                   <div className="flex items-center gap-1">
@@ -1010,7 +1012,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden">
             <div className="bg-slate-50 p-4 border-b border-slate-100 flex justify-between items-center">
-              <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                 {editingItem ? <PenLine className="text-cyan-600" /> : <Plus className="text-cyan-600" />}
                 {editingItem ? 'カード情報を編集' : '新規カード登録'}
               </h3>
@@ -1159,6 +1161,6 @@ export const InventoryList: React.FC<InventoryListProps> = ({
         onConfirm={confirmDialog.onConfirm}
         onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
       />
-    </div>
+    </PageContainer>
   );
 };

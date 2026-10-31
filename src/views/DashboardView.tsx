@@ -7,6 +7,7 @@ import { LayoutDashboard, Layers, Package, CircleAlert, Info, Plus, X, Trash, Ca
 import { StatsWidget } from '../components/ui/StatsWidget';
 import { useAppContext } from '@/context/AppContext';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { PageContainer, PageHeader } from '@/components/layout/Page';
 
 interface DashboardViewProps {
   stats: {
@@ -58,18 +59,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ stats }) => {
   };
 
   return (
-    <div className="p-4 md:p-8 pb-24 max-w-7xl mx-auto">
-      <div className="flex justify-between items-center mb-8">
-        <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
-          <div className="bg-cyan-600 p-2 rounded-lg text-white">
-            <LayoutDashboard size={24} />
-          </div>
-          ダッシュボード
-        </h2>
+    <PageContainer>
+      <PageHeader icon={LayoutDashboard} title="ダッシュボード">
         <div className="text-xs font-mono text-slate-400 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
           SYSTEM: ONLINE
         </div>
-      </div>
+      </PageHeader>
 
       {/* 1. クイックナビゲーション（在庫一覧への導線強化） */}
       <div className="mb-8">
@@ -248,7 +243,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ stats }) => {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-300">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200">
             <div className="bg-slate-50 p-6 border-b border-slate-100 flex justify-between items-center">
-              <h3 className="font-bold text-xl text-slate-800">お知らせを投稿</h3>
+              <h3 className="text-lg font-bold text-slate-800">お知らせを投稿</h3>
               <button onClick={() => setIsNewsModalOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <X size={28} />
               </button>
@@ -332,6 +327,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ stats }) => {
         }}
         onCancel={() => setDeleteTarget(null)}
       />
-    </div>
+    </PageContainer>
   );
 };

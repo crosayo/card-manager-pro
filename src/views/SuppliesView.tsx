@@ -11,6 +11,7 @@ import { useCart } from '@/context/CartContext';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useQuantityDialog } from '@/components/ui/QuantityDialog';
 import { getErrorMessage } from '@/utils';
+import { PageContainer, PageHeader } from '@/components/layout/Page';
 
 const CATEGORY_ORDER: Supply['category'][] = ['sleeve', 'playmat', 'other'];
 
@@ -242,13 +243,10 @@ export const SuppliesView: React.FC = () => {
   }
 
   return (
-    <div className="p-4 md:p-8 pb-24 max-w-7xl mx-auto">
+    <PageContainer>
       {quantityDialog.dialog}
       {/* ヘッダー */}
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-          <Package className="text-cyan-600" /> サプライ
-        </h2>
+      <PageHeader icon={Package} title="サプライ">
         <div className="flex items-center gap-3">
           <div className="flex rounded-lg border border-slate-200 overflow-hidden text-sm">
             <button
@@ -273,7 +271,7 @@ export const SuppliesView: React.FC = () => {
             </button>
           )}
         </div>
-      </div>
+      </PageHeader>
 
       {/* 統計ウィジェット */}
       <div className="grid grid-cols-3 gap-4 mb-8">
@@ -297,7 +295,7 @@ export const SuppliesView: React.FC = () => {
 
         return (
           <div key={cat} id={`section-${cat}`} className="mb-10">
-            <h3 className="text-lg font-bold text-slate-700 mb-4 pb-2 border-b border-slate-200 flex items-center gap-2">
+            <h3 className="text-lg font-bold text-slate-800 mb-4 pb-2 border-b border-slate-200 flex items-center gap-2">
               {isCategoryHighlighted && <span className="w-1.5 h-5 bg-cyan-500 rounded-full inline-block" />}
               {SUPPLY_CATEGORY_LABELS[cat]}
               <span className="text-sm font-normal text-slate-400">({items.length}件)</span>
@@ -428,7 +426,7 @@ export const SuppliesView: React.FC = () => {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
             <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-xl">
-              <h3 className="font-bold text-slate-800">{editTarget ? 'サプライ編集' : 'サプライ追加'}</h3>
+              <h3 className="text-lg font-bold text-slate-800">{editTarget ? 'サプライ編集' : 'サプライ追加'}</h3>
               <button onClick={closeModal} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
             </div>
             <div className="p-5 space-y-4">
@@ -526,7 +524,7 @@ export const SuppliesView: React.FC = () => {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full">
             <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-xl">
-              <h3 className="font-bold text-slate-800">画像のアップロード</h3>
+              <h3 className="text-lg font-bold text-slate-800">画像のアップロード</h3>
               <button onClick={() => { setUploadTarget(null); setImageFile(null); setImagePreview(null); }} className="text-slate-400 hover:text-slate-600">
                 <X size={20} />
               </button>
@@ -581,6 +579,6 @@ export const SuppliesView: React.FC = () => {
         onConfirm={confirmDialog.onConfirm}
         onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
       />
-    </div>
+    </PageContainer>
   );
 };

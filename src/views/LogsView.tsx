@@ -7,6 +7,7 @@ import { StockLog } from '@/types';
 import { api } from '@/services/api';
 import { RARITY_STYLES, RARITY_DEFAULT_STYLE } from '@/constants';
 import Link from 'next/link';
+import { PageContainer, PageHeader } from '@/components/layout/Page';
 
 const SOURCE_LABELS: Record<StockLog['source'], string> = {
   manual: '手動操作',
@@ -102,12 +103,8 @@ export const LogsView: React.FC = () => {
   };
 
   return (
-    <div className="p-4 md:p-8 pb-20">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-          <ScrollText /> 在庫変動ログ
-        </h2>
-      </div>
+    <PageContainer>
+      <PageHeader icon={ScrollText} title="在庫変動ログ" />
 
       {/* コントロールバー */}
       <div className="flex flex-wrap gap-2 mb-4 items-center justify-between">
@@ -209,17 +206,17 @@ export const LogsView: React.FC = () => {
                 {!isCollapsed && (
                   <table className="w-full text-left text-sm">
                     <thead>
-                      <tr className="text-slate-400 text-xs border-b border-slate-100">
-                        <th className="px-4 py-2 font-medium">
+                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs font-bold">
+                        <th className="px-4 py-2">
                           {groupBy === 'date' ? '時刻' : '日時'}
                         </th>
-                        <th className="px-4 py-2 font-medium">カード名</th>
-                        <th className="px-4 py-2 font-medium">型番</th>
-                        {groupBy !== 'rarity' && <th className="px-4 py-2 font-medium">レアリティ</th>}
-                        <th className="px-4 py-2 font-medium text-center">変動</th>
-                        <th className="px-4 py-2 font-medium text-center">変動後</th>
-                        <th className="px-4 py-2 font-medium">種別</th>
-                        <th className="px-4 py-2 font-medium">メモ</th>
+                        <th className="px-4 py-2">カード名</th>
+                        <th className="px-4 py-2">型番</th>
+                        {groupBy !== 'rarity' && <th className="px-4 py-2">レアリティ</th>}
+                        <th className="px-4 py-2 text-center">変動</th>
+                        <th className="px-4 py-2 text-center">変動後</th>
+                        <th className="px-4 py-2">種別</th>
+                        <th className="px-4 py-2">メモ</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
@@ -290,7 +287,7 @@ export const LogsView: React.FC = () => {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setSelectedLog(null)}>
           <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-slate-100 bg-slate-50 rounded-t-xl flex justify-between items-center">
-              <h3 className="font-bold text-slate-800">ログ詳細</h3>
+              <h3 className="text-lg font-bold text-slate-800">ログ詳細</h3>
               <button onClick={() => setSelectedLog(null)} className="text-slate-400 hover:text-slate-600">
                 <X size={20} />
               </button>
@@ -357,6 +354,6 @@ export const LogsView: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 };
