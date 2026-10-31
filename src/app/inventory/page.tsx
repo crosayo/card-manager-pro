@@ -123,7 +123,7 @@ function InventoryPageContent() {
       }));
       // ログ記録（失敗しても無視）
       api.addStockLog({ itemId: id, delta: totalDelta, stockAfter: updatedItem.stock, source: 'manual' }).catch(() => {});
-    } catch (e: any) {
+    } catch {
       // 失敗時: サーバーから現在値を取得して正確な値に戻す
       try {
         const current = await api.fetchItemById(id);

@@ -3,7 +3,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Eye, EyeOff, Search, Plus, LoaderCircle, Funnel, ArrowUpDown, PenLine, Trash, X, Save, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, ExternalLink, Upload, ChevronsLeft, ChevronsRight, Calendar, ChevronDown, ShoppingCart, Check, Copy } from 'lucide-react';
+import { Eye, Search, Plus, LoaderCircle, Funnel, ArrowUpDown, PenLine, Trash, X, Save, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Upload, ChevronsLeft, ChevronsRight, Calendar, ChevronDown, ShoppingCart, Check, Copy } from 'lucide-react';
 import { Item, News, Product, SortConfig, AppError, ToastType } from '@/types';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/services/api';

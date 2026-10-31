@@ -828,7 +828,7 @@ export const api = {
       const { data, error } = await supabase.rpc('get_distinct_rarities');
       if (error) throw error;
       return (data || []).map((row: any) => row.rarity).filter(Boolean);
-    } catch (e: any) {
+    } catch {
       console.warn("RPC 'get_distinct_rarities' not found.");
       throw new Error("レアリティの集計に失敗しました。");
     }

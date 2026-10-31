@@ -1,8 +1,8 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Download, Zap, RefreshCw, Check, LoaderCircle, Save, Trash, Copy, Plus, Database, ArrowRight, Bookmark, TriangleAlert, CircleArrowRight, SquareCheckBig, Square, Layers } from 'lucide-react';
+import React, { useState } from 'react';
+import { Download, Zap, RefreshCw, Check, LoaderCircle, Save, Trash, Copy, Plus, Database, ArrowRight, Bookmark, TriangleAlert, SquareCheckBig, Square, Layers } from 'lucide-react';
 import { AppError, ToastType, Item } from '../types';
 import { api } from '../services/api';
 import { useAppContext } from '../context/AppContext';

@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Shield, LoaderCircle, Save, FileUp, Database, CircleAlert, CircleCheck, List, Copy, Terminal, Download, Trash, TriangleAlert, RefreshCw, Calendar, Plus, WandSparkles, Upload, ArrowUp, ArrowDown, X, Monitor, Bell, Send } from 'lucide-react';
+import { Settings, Shield, LoaderCircle, Save, Database, CircleAlert, List, Copy, Terminal, Download, Trash, TriangleAlert, RefreshCw, Calendar, Plus, WandSparkles, Upload, ArrowUp, ArrowDown, X, Monitor, Bell, Send } from 'lucide-react';
 import { api } from '../services/api';
 import { AppError, Season, ToastType } from '../types';
 import { useAppContext } from '../context/AppContext';
@@ -864,7 +864,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setIsSaving(true);
     try {
       await saveSystemInfo(localSystemInfo);
-    } catch (e: any) {
+    } catch {
       // toast is handled in context
     } finally {
       setIsSaving(false);

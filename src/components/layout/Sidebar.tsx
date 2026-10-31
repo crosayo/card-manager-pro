@@ -5,7 +5,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Database, X, LayoutDashboard, Layers, Menu, Download, Settings, LogOut, LogIn, Calendar, ChevronDown, ChevronRight, Folder, Info, ScrollText, ShoppingBag, Package, Inbox, Link2 } from 'lucide-react';
-import { Product, TabType, Season } from '@/types';
+import { Product, TabType } from '@/types';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/services/api';
 
