@@ -96,8 +96,10 @@ export const RequestsView: React.FC = () => {
     }
   }, [addToast, isAdmin]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- 表示時のデータ取得（外部との同期）
   useEffect(() => { load(); }, [load]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage はサーバー描画時に読めないため、ハイドレーション後に読む
   useEffect(() => { setOwnedTokens(getSavedRequestTokens()); }, []);
 
   // 編集用リンク（/requests?token=...）から開かれた場合: トークンを照合してこのブラウザに保存する

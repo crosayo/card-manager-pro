@@ -100,6 +100,7 @@ export const InvitesView: React.FC = () => {
     }
   }, [addToast]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- 表示時のデータ取得（外部との同期）
   useEffect(() => { if (isAdmin) load(); }, [isAdmin, load]);
 
   const replaceInvites = (updated: Invite[]) => {

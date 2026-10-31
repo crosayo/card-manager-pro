@@ -34,6 +34,7 @@ function InventoryPageContent() {
   // データ取得ロジック
   useEffect(() => {
     if (selectedCategory) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- レアリティ絞り込みは AppContext の state のため描画中には戻せない。カテゴリ変更時にまとめて戻す
       setCurrentPage(1);
       setSelectedRarities([]);
     }

@@ -233,6 +233,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       setIsAdmin(!!session?.user);
       setIsAuthReady(true);
     });
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 初回表示時のデータ取得（外部との同期）
     refreshInviteStatus();
     refreshProducts();
     refreshRarities();
@@ -248,6 +249,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   // ログインしたら共通データを読み直す
   useEffect(() => {
     if (!isAdmin) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- ログイン時の共通データの再取得（外部との同期）
     refreshProducts();
     refreshRarities();
     refreshSeasons();

@@ -308,6 +308,7 @@ export const SuppliesView: React.FC = () => {
                     {/* 画像エリア */}
                     <div className="relative aspect-square bg-slate-100">
                       {supply.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- Supabase Storage の画像。Vercel の画像最適化（無料枠に上限あり）を使わないため <img> のまま
                         <img src={supply.imageUrl} alt={supply.name} className="w-full h-full object-cover" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-slate-300">
@@ -466,6 +467,7 @@ export const SuppliesView: React.FC = () => {
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1">画像</label>
                   {imagePreview && (
+                    // eslint-disable-next-line @next/next/no-img-element -- アップロード前のプレビュー（ブラウザ内の一時URL）のため <img> のまま
                     <img src={imagePreview} alt="プレビュー" className="w-full h-32 object-cover rounded-lg mb-2 border border-slate-200" />
                   )}
                   <div className="flex gap-2">
@@ -530,6 +532,7 @@ export const SuppliesView: React.FC = () => {
             <div className="p-5 space-y-4">
               <p className="text-sm text-slate-600">「{uploadTarget.name}」の画像をアップロードしてください。</p>
               {imagePreview && (
+                // eslint-disable-next-line @next/next/no-img-element -- アップロード前のプレビュー（ブラウザ内の一時URL）のため <img> のまま
                 <img src={imagePreview} alt="プレビュー" className="w-full h-40 object-cover rounded-lg border border-slate-200" />
               )}
               <div className="flex gap-2">
