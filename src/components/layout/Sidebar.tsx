@@ -1,13 +1,12 @@
 
 'use client';
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Database, X, LayoutDashboard, Layers, Menu, Download, Settings, LogOut, LogIn, Calendar, ChevronDown, ChevronRight, Folder, Info, ScrollText, ShoppingBag, Package, Inbox, Link2, type LucideIcon } from 'lucide-react';
 import { Product, TabType } from '@/types';
 import { useAppContext } from '@/context/AppContext';
-import { api } from '@/services/api';
 
 interface SidebarProps {
   isMobileMenuOpen: boolean;
@@ -30,11 +29,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { seasons, systemInfo } = useAppContext();
+  const { seasons, systemInfo, pendingRequestsCount } = useAppContext();
   const [expandedSeasons, setExpandedSeasons] = useState<Record<string, boolean>>({});
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
   const [isSuppliesOpen, setIsSuppliesOpen] = useState(false);
-  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   const [isSeasonsInitialized, setIsSeasonsInitialized] = useState(false);
   const [prevSelectedCategory, setPrevSelectedCategory] = useState<string | null>(null);
 
@@ -93,13 +91,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     });
     return groups;
   }, [products, seasons]);
-
-  // 管理者ログイン時に未対応リクエスト件数を取得
-  useEffect(() => {
-    if (!isAdmin) return;
-    api.fetchPendingRequestsCount().then(setPendingRequestsCount).catch(() => {});
-  }, [isAdmin]);
-  const pendingBadgeCount = isAdmin ? pendingRequestsCount : 0;
 
   // 以下2つは描画中に前回の値と比べて展開状態を調整する（effect で setState すると描画が二度走るため）
   if (selectedCategory !== prevSelectedCategory) {
@@ -197,9 +188,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   >
                     <item.icon size={18} />
                     <span className="flex-1">{item.label}</span>
-                    {item.badge && pendingBadgeCount > 0 && (
+                    {item.badge && pendingRequestsCount > 0 && (
                       <span className="bg-red-500 text-white text-xs font-bold rounded-full px-1.5 py-0.5 min-w-[20px] text-center leading-none">
-                        {Math.min(pendingBadgeCount, 99)}
+                        {Math.min(pendingRequestsCount, 99)}
                       </span>
                     )}
                   </Link>

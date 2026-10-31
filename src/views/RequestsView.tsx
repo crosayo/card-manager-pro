@@ -46,7 +46,7 @@ const getRarityStyle = (rarity: string): string => {
 };
 
 export const RequestsView: React.FC = () => {
-  const { isAdmin, addToast, rarities } = useAppContext();
+  const { isAdmin, addToast, rarities, refreshPendingRequestsCount } = useAppContext();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [requests, setRequests] = useState<CardRequest[]>([]);
@@ -89,12 +89,14 @@ export const RequestsView: React.FC = () => {
     try {
       const data = await api.fetchRequests(undefined, { includeToken: isAdmin });
       setRequests(data);
+      // 一覧を読んだ時点の件数にバッジをそろえる（新着が届いていた場合も反映）
+      if (isAdmin) refreshPendingRequestsCount();
     } catch (e) {
       addToast('error', 'リクエスト取得失敗', getErrorMessage(e));
     } finally {
       setIsLoading(false);
     }
-  }, [addToast, isAdmin]);
+  }, [addToast, isAdmin, refreshPendingRequestsCount]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- 表示時のデータ取得（外部との同期）
   useEffect(() => { load(); }, [load]);
@@ -419,6 +421,7 @@ export const RequestsView: React.FC = () => {
 
       setRequests(prev => prev.map(r => r.id === completingRequest.id ? updated : r));
       setCompletingRequest(null);
+      refreshPendingRequestsCount();
       if (stockFailures.length > 0) {
         addToast('error', '在庫の減算に失敗したものがあります', 'リクエストは完了済みです。以下の在庫を手動で調整してください。', {
           code: 'STOCK_DECREMENT_FAILED',
@@ -446,6 +449,7 @@ export const RequestsView: React.FC = () => {
         try {
           const updated = await api.updateRequestStatus(req.id, 'cancelled');
           setRequests(prev => prev.map(r => r.id === req.id ? updated : r));
+          refreshPendingRequestsCount();
           addToast('info', 'キャンセル完了', 'リクエストをキャンセルしました。');
         } catch (e) {
           addToast('error', 'キャンセル失敗', getErrorMessage(e));
@@ -465,6 +469,7 @@ export const RequestsView: React.FC = () => {
         try {
           await api.deleteRequest(req.id);
           setRequests(prev => prev.filter(r => r.id !== req.id));
+          refreshPendingRequestsCount();
           addToast('success', '削除完了', 'リクエストを削除しました。');
         } catch (e) {
           addToast('error', '削除失敗', getErrorMessage(e));

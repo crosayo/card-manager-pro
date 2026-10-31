@@ -27,6 +27,8 @@ interface AppContextType {
   setSelectedRarities: (rarities: string[]) => void;
   showOnlyInStock: boolean;
   setShowOnlyInStock: (val: boolean) => void;
+  pendingRequestsCount: number;  // 未対応リクエストの件数（サイドバーのバッジ。未ログイン時は0）
+  refreshPendingRequestsCount: () => Promise<void>;
   refreshProducts: () => Promise<void>;
   refreshRarities: () => Promise<void>;
   refreshSeasons: () => Promise<void>;
@@ -63,6 +65,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [systemInfo, setSystemInfo] = useState<SystemInfo>(INITIAL_SYSTEM_INFO);
   const [selectedRarities, setSelectedRarities] = useState<string[]>([]);
   const [showOnlyInStock, setShowOnlyInStock] = useState(false);
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
 
   // トーストID: Date.now() だと同一ミリ秒に複数出したとき重複するため連番を付与する
   const toastSeqRef = useRef(0);
@@ -121,6 +124,15 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       setSystemInfo(info);
     } catch (e) {
       console.error("Failed to fetch system info", e);
+    }
+  }, []);
+
+  // 未対応リクエストの件数を読み直す（リクエストを処理した画面からも呼ぶ）
+  const refreshPendingRequestsCount = useCallback(async () => {
+    try {
+      setPendingRequestsCount(await api.fetchPendingRequestsCount());
+    } catch (e) {
+      console.error("Failed to fetch pending requests count", e);
     }
   }, []);
 
@@ -255,7 +267,8 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
     refreshSeasons();
     refreshNews();
     refreshSystemInfo();
-  }, [isAdmin, refreshProducts, refreshRarities, refreshSeasons, refreshNews, refreshSystemInfo]);
+    refreshPendingRequestsCount();
+  }, [isAdmin, refreshProducts, refreshRarities, refreshSeasons, refreshNews, refreshSystemInfo, refreshPendingRequestsCount]);
 
   // 閲覧中に招待リンクの期限が来たら、その時点で閲覧できない状態にする
   useEffect(() => {
@@ -284,6 +297,8 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       setSelectedRarities,
       showOnlyInStock,
       setShowOnlyInStock,
+      pendingRequestsCount: isAdmin ? pendingRequestsCount : 0,
+      refreshPendingRequestsCount,
       refreshProducts,
       refreshRarities,
       refreshSeasons,
