@@ -10,6 +10,7 @@ import { api } from '@/services/api';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { RARITY_STYLES, RARITY_DEFAULT_STYLE } from '@/constants';
 import { useCart } from '@/context/CartContext';
+import { useQuantityDialog } from '@/components/ui/QuantityDialog';
 import { getErrorMessage } from '@/utils';
 
 interface InventoryListProps {
@@ -62,7 +63,8 @@ export const InventoryList: React.FC<InventoryListProps> = ({
 }) => {
   const { rarities, selectedRarities, setSelectedRarities, showOnlyInStock, setShowOnlyInStock } = useAppContext();
   const router = useRouter();
-  const { cartItems, addToCart } = useCart();
+  const { cartItems } = useCart();
+  const quantityDialog = useQuantityDialog();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   
@@ -377,6 +379,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
 
   return (
     <div className="p-4 md:p-8 pb-20">
+      {quantityDialog.dialog}
       {/* 閲覧専用バナー */}
       {!isAdmin && (
         <div className="bg-blue-600 text-white px-4 md:px-6 py-3 rounded-lg shadow-md mb-6 flex flex-col md:flex-row items-center justify-between gap-3">
@@ -738,12 +741,13 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                       {/* リクエストボタン */}
                       {(() => {
                         const effectiveStock = item.stock - (pendingQuantities[item.id] ?? 0);
-                        const inCart = cartItems.some(c => c.itemId === item.id);
+                        const cartQty = cartItems.find(c => c.itemId === item.id)?.quantity ?? 0;
+                        const inCart = cartQty > 0;
                         return (
                           <button
                             type="button"
                             disabled={effectiveStock <= 0}
-                            onClick={() => addToCart({ itemId: item.id, name: item.name, quantity: 1, maxStock: effectiveStock })}
+                            onClick={() => quantityDialog.open({ itemId: item.id, name: item.name, maxStock: effectiveStock })}
                             className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-bold transition-colors ${
                               inCart
                                 ? 'bg-cyan-100 text-cyan-700 border border-cyan-300'
@@ -751,10 +755,10 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                                   ? 'bg-slate-50 text-slate-300 border border-slate-200 cursor-not-allowed'
                                   : 'bg-slate-100 hover:bg-cyan-50 text-slate-500 hover:text-cyan-600 border border-slate-200 hover:border-cyan-300'
                             }`}
-                            title={effectiveStock <= 0 ? '在庫なし' : 'カートに追加'}
+                            title={effectiveStock <= 0 ? '在庫なし' : inCart ? 'カートの枚数を変更' : '枚数を選んでカートに追加'}
                           >
                             {inCart ? <Check size={12} /> : <ShoppingCart size={12} />}
-                            {inCart ? '追加済み' : effectiveStock <= 0 ? '在庫なし' : 'リクエスト'}
+                            {inCart ? `${cartQty}枚追加済み` : effectiveStock <= 0 ? '在庫なし' : 'リクエスト'}
                           </button>
                         );
                       })()}
@@ -883,12 +887,13 @@ export const InventoryList: React.FC<InventoryListProps> = ({
               {/* モバイル: リクエストボタン */}
               {(() => {
                 const effectiveStock = item.stock - (pendingQuantities[item.id] ?? 0);
-                const inCart = cartItems.some(c => c.itemId === item.id);
+                const cartQty = cartItems.find(c => c.itemId === item.id)?.quantity ?? 0;
+                const inCart = cartQty > 0;
                 return (
                   <div className="mt-2">
                     <button
                       disabled={effectiveStock <= 0}
-                      onClick={() => addToCart({ itemId: item.id, name: item.name, quantity: 1, maxStock: effectiveStock })}
+                      onClick={() => quantityDialog.open({ itemId: item.id, name: item.name, maxStock: effectiveStock })}
                       className={`w-full py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 border transition-colors ${
                         inCart
                           ? 'bg-cyan-50 text-cyan-700 border-cyan-300'
@@ -898,7 +903,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                       }`}
                     >
                       {inCart ? <Check size={14} /> : <ShoppingCart size={14} />}
-                      {inCart ? 'カートに追加済み' : effectiveStock <= 0 ? '在庫なし' : 'リクエストする'}
+                      {inCart ? `カートに${cartQty}枚追加済み（変更）` : effectiveStock <= 0 ? '在庫なし' : 'リクエストする'}
                     </button>
                   </div>
                 );

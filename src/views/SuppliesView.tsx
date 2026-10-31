@@ -9,6 +9,7 @@ import { Supply, SUPPLY_CATEGORY_LABELS } from '@/types';
 import { useAppContext } from '@/context/AppContext';
 import { useCart } from '@/context/CartContext';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { useQuantityDialog } from '@/components/ui/QuantityDialog';
 import { getErrorMessage } from '@/utils';
 
 const CATEGORY_ORDER: Supply['category'][] = ['sleeve', 'playmat', 'other'];
@@ -24,7 +25,10 @@ const INITIAL_FORM: FormData = { name: '', category: 'sleeve', releaseDate: '' }
 export const SuppliesView: React.FC = () => {
   const searchParams = useSearchParams();
   const { isAdmin, addToast } = useAppContext();
-  const { cartItems, addToCart } = useCart();
+  const { cartItems } = useCart();
+  const quantityDialog = useQuantityDialog((target, quantity, isUpdate) => {
+    addToast('success', isUpdate ? 'カートの枚数を変更' : 'カートに追加', `「${target.name}」を${quantity}枚${isUpdate ? 'にしました' : 'カートに追加しました'}。`);
+  });
 
   const [supplies, setSupplies] = useState<Supply[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -227,7 +231,7 @@ export const SuppliesView: React.FC = () => {
     setImagePreview(supply.imageUrl ?? null);
   };
 
-  const isInCart = (supplyId: number) => cartItems.some(c => c.supplyId === supplyId);
+  const cartQuantity = (supplyId: number) => cartItems.find(c => c.supplyId === supplyId)?.quantity ?? 0;
 
   if (isLoading) {
     return (
@@ -239,6 +243,7 @@ export const SuppliesView: React.FC = () => {
 
   return (
     <div className="p-4 md:p-8 pb-24 max-w-7xl mx-auto">
+      {quantityDialog.dialog}
       {/* ヘッダー */}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
@@ -299,7 +304,8 @@ export const SuppliesView: React.FC = () => {
             </h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
               {items.map(supply => {
-                const inCart = isInCart(supply.id);
+                const cartQty = cartQuantity(supply.id);
+                const inCart = cartQty > 0;
                 return (
                   <div
                     key={supply.id}
@@ -373,11 +379,7 @@ export const SuppliesView: React.FC = () => {
                       {/* リクエストボタン */}
                       <button
                         disabled={supply.stock === 0}
-                        onClick={() => {
-                          if (inCart) return;
-                          addToCart({ supplyId: supply.id, name: supply.name, quantity: 1, maxStock: supply.stock });
-                          addToast('success', 'カートに追加', `「${supply.name}」をカートに追加しました。`);
-                        }}
+                        onClick={() => quantityDialog.open({ supplyId: supply.id, name: supply.name, maxStock: supply.stock })}
                         className={`w-full py-1.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
                           inCart
                             ? 'bg-emerald-50 text-emerald-600 border border-emerald-200'
@@ -387,7 +389,7 @@ export const SuppliesView: React.FC = () => {
                         }`}
                       >
                         {inCart ? (
-                          <><CircleCheckBig size={12} /> 追加済み ✓</>
+                          <><CircleCheckBig size={12} /> {cartQty}枚追加済み（変更）</>
                         ) : supply.stock === 0 ? (
                           '在庫なし'
                         ) : (
