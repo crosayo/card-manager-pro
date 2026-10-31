@@ -125,6 +125,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   }
 
+  // 選択中のパックをもう一度押したら絞り込みを解除する
+  const productHref = (name: string) =>
+    selectedCategory === name ? '/inventory' : `/inventory?category=${encodeURIComponent(name)}`;
+
   const toggleSeason = (seasonName: string) => {
     setExpandedSeasons(prev => ({
       ...prev,
@@ -276,7 +280,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         {seasonProducts.map(product => (
                           <Link
                             key={product.id}
-                            href={`/inventory?category=${encodeURIComponent(product.name)}`}
+                            href={productHref(product.name)}
                             onClick={handleItemClick}
                             className={`
                               group relative block w-full text-left pl-9 pr-3 py-1.5 text-sm transition-colors border-l-2
@@ -320,7 +324,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         {groupedProducts['その他'].map(product => (
                           <Link
                             key={product.id}
-                            href={`/inventory?category=${encodeURIComponent(product.name)}`}
+                            href={productHref(product.name)}
                             onClick={handleItemClick}
                             className={`
                               group relative block w-full text-left pl-9 pr-3 py-1.5 text-sm transition-colors border-l-2

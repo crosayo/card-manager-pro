@@ -32,12 +32,11 @@ function InventoryPageContent() {
   const processingRef = useRef<Set<number>>(new Set());
 
   // データ取得ロジック
+  // パックの選択・解除のたびにページを1へ戻す。レアリティ絞り込みはパックを選んだときだけ外し、解除時は残す（チップで見えていて個別に外せるため）
   useEffect(() => {
-    if (selectedCategory) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- レアリティ絞り込みは AppContext の state のため描画中には戻せない。カテゴリ変更時にまとめて戻す
-      setCurrentPage(1);
-      setSelectedRarities([]);
-    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- レアリティ絞り込みは AppContext の state のため描画中には戻せない。カテゴリ変更時にまとめて戻す
+    setCurrentPage(1);
+    if (selectedCategory) setSelectedRarities([]);
   }, [selectedCategory, setSelectedRarities]);
 
   useEffect(() => {
