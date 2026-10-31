@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { LogIn, Database, LoaderCircle, CircleAlert } from 'lucide-react';
 import { api } from '../../services/api';
+import { getErrorMessage } from '@/utils';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,8 +22,8 @@ export default function LoginPage() {
       await api.signInWithEmail(email, password);
       // ログイン成功したらトップページへ
       router.push('/');
-    } catch (err: any) {
-      setError(err.message || 'ログインに失敗しました。メールアドレスとパスワードを確認してください。');
+    } catch (err) {
+      setError(getErrorMessage(err) || 'ログインに失敗しました。メールアドレスとパスワードを確認してください。');
     } finally {
       setIsLoading(false);
     }

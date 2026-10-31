@@ -8,6 +8,7 @@ import { AppError, Season, ToastType } from '../types';
 import { useAppContext } from '../context/AppContext';
 import { INITIAL_RARITIES, INITIAL_SEASONS } from '../constants';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { getErrorMessage } from '@/utils';
 
 interface SettingsViewProps {
   isAdmin: boolean;
@@ -799,8 +800,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     try {
       await api.updateDiscordWebhookUrl(discordWebhookUrl);
       addToast('success', '保存しました', 'Discord Webhook URLを保存しました。');
-    } catch (e: any) {
-      addToast('error', '保存失敗', e.message);
+    } catch (e) {
+      addToast('error', '保存失敗', getErrorMessage(e));
     } finally {
       setIsSavingWebhook(false);
     }
@@ -820,8 +821,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       addToast('success', 'テスト送信成功', 'Discordへの通知が正常に送信されました。');
-    } catch (e: any) {
-      addToast('error', 'テスト送信失敗', `送信に失敗しました: ${e.message}`);
+    } catch (e) {
+      addToast('error', 'テスト送信失敗', `送信に失敗しました: ${getErrorMessage(e)}`);
     } finally {
       setIsTestingSending(false);
     }
@@ -838,8 +839,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setRarities(localRarities); // Optimistic Update
       await api.saveRarities(localRarities);
       addToast('success', '保存完了', 'レアリティ設定を保存しました。');
-    } catch (e: any) {
-      addToast('error', '保存失敗', e.message);
+    } catch (e) {
+      addToast('error', '保存失敗', getErrorMessage(e));
       await refreshRarities(); // Revert on error
     } finally {
       setIsSaving(false);
@@ -852,8 +853,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setSeasons(localSeasons); // Optimistic Update
       await api.saveSeasons(localSeasons);
       addToast('success', '保存完了', 'シーズン設定を保存しました。');
-    } catch (e: any) {
-      addToast('error', '保存失敗', e.message);
+    } catch (e) {
+      addToast('error', '保存失敗', getErrorMessage(e));
       await refreshSeasons(); // Revert on error
     } finally {
       setIsSaving(false);
@@ -882,8 +883,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         api.saveSystemInfo(localSystemInfo)
       ]);
       addToast('success', '一括保存完了', 'システム設定をデータベースに保存しました。');
-    } catch (e: any) {
-      addToast('error', '設定の保存に失敗しました', e.message);
+    } catch (e) {
+      addToast('error', '設定の保存に失敗しました', getErrorMessage(e));
     } finally {
       setIsSaving(false);
     }
@@ -950,8 +951,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       link.click();
       URL.revokeObjectURL(url);
       addToast('success', 'バックアップ完了', `${items.length}件のデータをエクスポートしました。`);
-    } catch (e: any) {
-      addToast('error', 'バックアップ失敗', e.message);
+    } catch (e) {
+      addToast('error', 'バックアップ失敗', getErrorMessage(e));
     } finally {
       setIsBackingUp(false);
       setBackupProgress(0);
@@ -966,7 +967,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const inputEl = e.target;
     setConfirmDialog({
       isOpen: true,
       title: 'バックアップ復元',
@@ -975,12 +975,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       confirmLabel: '復元',
       onConfirm: () => {
         setConfirmDialog(prev => ({ ...prev, isOpen: false }));
-        processRestore(file, inputEl);
+        processRestore(file);
       }
     });
   };
 
-  const processRestore = async (file: File, inputEl: HTMLInputElement) => {
+  const processRestore = async (file: File) => {
     setIsRestoring(true);
     const reader = new FileReader();
     reader.onload = async (event) => {
@@ -995,8 +995,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         await api.restoreFromBackup(backupData);
         await refreshProducts();
         addToast('success', '復元完了', 'バックアップからのデータ復元が完了しました。');
-      } catch (err: any) {
-        addToast('error', '復元失敗', err.message);
+      } catch (err) {
+        addToast('error', '復元失敗', getErrorMessage(err));
       } finally {
         setIsRestoring(false);
         if (importFileRef.current) importFileRef.current.value = '';
@@ -1025,8 +1025,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     try {
       const count = await api.normalizeAllItems((progress) => setNormalizationCount(progress));
       addToast('success', '正規化完了', `${count}件のデータの表記揺れを修正しました。`);
-    } catch (e: any) {
-      addToast('error', '正規化失敗', e.message);
+    } catch (e) {
+      addToast('error', '正規化失敗', getErrorMessage(e));
     } finally {
       setIsNormalizing(false);
       setNormalizationCount(0);
@@ -1048,8 +1048,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           await api.resetDatabase();
           await refreshProducts();
           addToast('success', 'データ削除完了', 'データベースを初期化しました。');
-        } catch (e: any) {
-          addToast('error', '削除失敗', e.message);
+        } catch (e) {
+          addToast('error', '削除失敗', getErrorMessage(e));
         } finally {
           setIsResetting(false);
         }

@@ -10,6 +10,7 @@ import { useAppContext } from '@/context/AppContext';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { RARITY_STYLES, RARITY_DEFAULT_STYLE } from '@/constants';
 import { buildRequestEditUrl, getSavedRequestTokens, saveRequestToken } from '@/lib/requestTokens';
+import { getErrorMessage } from '@/utils';
 
 const STATUS_LABELS: Record<CardRequest['status'], string> = {
   pending: '受付中',
@@ -88,8 +89,8 @@ export const RequestsView: React.FC = () => {
     try {
       const data = await api.fetchRequests(undefined, { includeToken: isAdmin });
       setRequests(data);
-    } catch (e: any) {
-      addToast('error', 'リクエスト取得失敗', e.message);
+    } catch (e) {
+      addToast('error', 'リクエスト取得失敗', getErrorMessage(e));
     } finally {
       setIsLoading(false);
     }
@@ -117,8 +118,8 @@ export const RequestsView: React.FC = () => {
           setShowAll(true);
           addToast('success', '編集できるようになりました', 'このブラウザで、あなたのリクエストを編集できます。');
         }
-      } catch (e: any) {
-        if (!cancelled) addToast('error', '編集用リンクの確認に失敗しました', e.message);
+      } catch (e) {
+        if (!cancelled) addToast('error', '編集用リンクの確認に失敗しました', getErrorMessage(e));
       } finally {
         // トークンをアドレスバーや履歴に残さない
         if (!cancelled) router.replace('/requests');
@@ -212,9 +213,9 @@ export const RequestsView: React.FC = () => {
           requestId,
           note,
         }).catch(e => console.warn('ログ記録失敗:', e));
-      } catch (e: any) {
+      } catch (e) {
         console.error('在庫調整失敗:', e);
-        failures.push(`${adj.label}（${adj.delta > 0 ? '+' : ''}${adj.delta}枚: ${e.message}）`);
+        failures.push(`${adj.label}（${adj.delta > 0 ? '+' : ''}${adj.delta}枚: ${getErrorMessage(e)}）`);
       }
     }
     return failures;
@@ -290,8 +291,8 @@ export const RequestsView: React.FC = () => {
       } else {
         addToast('success', 'カード変更完了', `${newItem.rarity} / ${newItem.cardId} に変更しました。`);
       }
-    } catch (e: any) {
-      addToast('error', '変更失敗', e.message);
+    } catch (e) {
+      addToast('error', '変更失敗', getErrorMessage(e));
     }
   };
 
@@ -381,8 +382,8 @@ export const RequestsView: React.FC = () => {
           ? 'リクエストを更新し、在庫に反映しました。'
           : 'リクエストを更新しました。');
       }
-    } catch (e: any) {
-      addToast('error', '更新失敗', e.message);
+    } catch (e) {
+      addToast('error', '更新失敗', getErrorMessage(e));
     } finally {
       setIsUpdating(false);
     }
@@ -425,8 +426,8 @@ export const RequestsView: React.FC = () => {
       } else {
         addToast('success', '完了処理完了', 'リクエストを完了しました。');
       }
-    } catch (e: any) {
-      addToast('error', '完了処理失敗', e.message);
+    } catch (e) {
+      addToast('error', '完了処理失敗', getErrorMessage(e));
     } finally {
       setIsUpdating(false);
     }
@@ -444,8 +445,8 @@ export const RequestsView: React.FC = () => {
           const updated = await api.updateRequestStatus(req.id, 'cancelled');
           setRequests(prev => prev.map(r => r.id === req.id ? updated : r));
           addToast('info', 'キャンセル完了', 'リクエストをキャンセルしました。');
-        } catch (e: any) {
-          addToast('error', 'キャンセル失敗', e.message);
+        } catch (e) {
+          addToast('error', 'キャンセル失敗', getErrorMessage(e));
         }
       },
     });
@@ -463,8 +464,8 @@ export const RequestsView: React.FC = () => {
           await api.deleteRequest(req.id);
           setRequests(prev => prev.filter(r => r.id !== req.id));
           addToast('success', '削除完了', 'リクエストを削除しました。');
-        } catch (e: any) {
-          addToast('error', '削除失敗', e.message);
+        } catch (e) {
+          addToast('error', '削除失敗', getErrorMessage(e));
         }
       },
     });

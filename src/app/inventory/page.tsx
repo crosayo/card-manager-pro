@@ -8,9 +8,10 @@ import { useAppContext } from '@/context/AppContext';
 import { api } from '@/services/api';
 import { Item, SortConfig } from '@/types';
 import { LoaderCircle } from 'lucide-react';
+import { getErrorCode, getErrorMessage } from '@/utils';
 
 function InventoryPageContent() {
-  const { isAdmin, handleLoginToggle, news, isLoading, addToast, setIsLoading, products, rarities, selectedRarities, setSelectedRarities, showOnlyInStock, setShowOnlyInStock } = useAppContext();
+  const { isAdmin, handleLoginToggle, news, isLoading, addToast, setIsLoading, products, rarities, selectedRarities, setSelectedRarities, showOnlyInStock } = useAppContext();
   const searchParams = useSearchParams();
   
   // 状態管理
@@ -58,10 +59,10 @@ function InventoryPageContent() {
         setTotalCount(result.count);
         // 仮減らし在庫の取得（失敗しても無視）
         api.fetchPendingQuantities().then(setPendingQuantities).catch(() => {});
-      } catch (e: any) {
+      } catch (e) {
         addToast('error', 'データ取得エラー', '在庫データの読み込みに失敗しました。', {
-          code: e.code || 'FETCH_ERROR',
-          message: e.message,
+          code: getErrorCode(e) || 'FETCH_ERROR',
+          message: getErrorMessage(e),
           timestamp: new Date().toLocaleString()
         });
       } finally {
@@ -141,8 +142,8 @@ function InventoryPageContent() {
       setItems(prev => [addedItem, ...prev].slice(0, pageSize));
       setTotalCount(prev => prev + 1);
       addToast('success', '登録完了', `「${addedItem.name}」を追加しました。`);
-    } catch (e: any) {
-      addToast('error', '登録失敗', e.message);
+    } catch (e) {
+      addToast('error', '登録失敗', getErrorMessage(e));
     } finally {
       setIsLoading(false);
     }
@@ -154,8 +155,8 @@ function InventoryPageContent() {
       const updatedItem = await api.updateItem(id, updates);
       setItems(prev => prev.map(item => item.id === id ? updatedItem : item));
       addToast('success', '更新完了', `「${updatedItem.name}」の情報を更新しました。`);
-    } catch (e: any) {
-      addToast('error', '更新失敗', e.message);
+    } catch (e) {
+      addToast('error', '更新失敗', getErrorMessage(e));
     } finally {
       setIsLoading(false);
     }
@@ -168,8 +169,8 @@ function InventoryPageContent() {
       setItems(prev => prev.filter(item => item.id !== id));
       setTotalCount(prev => prev - 1);
       addToast('info', '削除完了', 'アイテムを削除しました。');
-    } catch (e: any) {
-      addToast('error', '削除失敗', e.message);
+    } catch (e) {
+      addToast('error', '削除失敗', getErrorMessage(e));
     } finally {
       setIsLoading(false);
     }

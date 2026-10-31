@@ -10,6 +10,7 @@ import { api } from '@/services/api';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { RARITY_STYLES, RARITY_DEFAULT_STYLE } from '@/constants';
 import { useCart } from '@/context/CartContext';
+import { getErrorMessage } from '@/utils';
 
 interface InventoryListProps {
   isAdmin: boolean;
@@ -39,7 +40,6 @@ interface InventoryListProps {
 export const InventoryList: React.FC<InventoryListProps> = ({
   isAdmin,
   handleLoginToggle,
-  news,
   searchKeyword,
   setSearchKeyword,
   isLoading,
@@ -208,8 +208,8 @@ export const InventoryList: React.FC<InventoryListProps> = ({
       link.href = URL.createObjectURL(blob);
       link.download = fileName;
       link.click();
-    } catch (e: any) {
-      addToast('error', 'CSV出力失敗', e.message);
+    } catch (e) {
+      addToast('error', 'CSV出力失敗', getErrorMessage(e));
     }
   };
 
@@ -221,7 +221,6 @@ export const InventoryList: React.FC<InventoryListProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const inputEl = e.target;
     setConfirmDialog({
       isOpen: true,
       title: 'CSV在庫更新',
@@ -229,12 +228,12 @@ export const InventoryList: React.FC<InventoryListProps> = ({
       variant: 'warning',
       onConfirm: () => {
         setConfirmDialog(prev => ({ ...prev, isOpen: false }));
-        processCSVImport(file, inputEl);
+        processCSVImport(file);
       }
     });
   };
 
-  const processCSVImport = async (file: File, inputEl: HTMLInputElement) => {
+  const processCSVImport = async (file: File) => {
     setIsImporting(true);
     addToast('info', '在庫更新開始', 'CSVを解析して更新処理を実行しています...');
 
@@ -257,7 +256,6 @@ export const InventoryList: React.FC<InventoryListProps> = ({
         }
 
         const updates: { id: number, stock: number }[] = [];
-        let successCount = 0;
         let failCount = 0;
 
         for (let i = 1; i < rows.length; i++) {
@@ -274,7 +272,6 @@ export const InventoryList: React.FC<InventoryListProps> = ({
             const stock = parseInt(stockStr);
             if (!isNaN(id) && !isNaN(stock)) {
               updates.push({ id, stock });
-              successCount++;
             } else {
               failCount++;
             }
@@ -311,9 +308,9 @@ export const InventoryList: React.FC<InventoryListProps> = ({
           addToast('error', '更新データなし', '有効な更新データが見つかりませんでした。CSVの形式を確認してください。');
         }
 
-      } catch (err: any) {
+      } catch (err) {
         console.error(err);
-        addToast('error', 'インポート失敗', err.message);
+        addToast('error', 'インポート失敗', getErrorMessage(err));
       } finally {
         setIsImporting(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -657,7 +654,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-sm uppercase tracking-wider">
               {['releaseDate', 'cardId', 'name', 'rarity', 'stock', 'category'].map((key) => (
-                <th key={key} className="p-4 cursor-pointer hover:bg-slate-100 transition-colors group" onClick={() => handleSort(key as any)}>
+                <th key={key} className="p-4 cursor-pointer hover:bg-slate-100 transition-colors group" onClick={() => handleSort(key as SortConfig['key'])}>
                   <div className="flex items-center gap-1">
                     {key === 'releaseDate' ? '発売日' : key === 'cardId' ? '型番' : key === 'name' ? 'カード名' : key === 'rarity' ? 'レア' : key === 'stock' ? '在庫' : '収録パック'}
                     <ArrowUpDown size={14} className={`opacity-0 group-hover:opacity-100 ${sortConfig.key === key ? 'opacity-100 text-cyan-600' : ''}`} />

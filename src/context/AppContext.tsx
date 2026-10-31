@@ -3,17 +3,19 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import type { User } from '@supabase/supabase-js';
 import { ToastType, AppError, News, Product, Season, SystemInfo, InviteStatus } from '@/types';
 import { api } from '@/services/api';
 import { getInviteCode } from '@/lib/invite';
 import { INITIAL_RARITIES, INITIAL_SEASONS, INITIAL_SYSTEM_INFO } from '@/constants';
+import { getErrorMessage } from '@/utils';
 
 interface AppContextType {
   isAdmin: boolean;
   isAuthReady: boolean;          // ログイン状態の確認が終わったか
   inviteStatus: InviteStatus;    // 未ログイン時の招待リンクの状態
   refreshInviteStatus: () => Promise<void>;
-  user: any;
+  user: User | null;
   isLoading: boolean;
   news: News[];
   toasts: ToastType[];
@@ -51,7 +53,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [inviteStatus, setInviteStatus] = useState<InviteStatus>({ state: 'checking' });
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [news, setNews] = useState<News[]>([]);
   const [toasts, setToasts] = useState<ToastType[]>([]);
@@ -127,8 +129,8 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       await api.addProduct(productData);
       await refreshProducts();
       addToast('success', '製品追加', `「${productData.name}」を追加しました`);
-    } catch (e: any) {
-      addToast('error', '追加失敗', e.message);
+    } catch (e) {
+      addToast('error', '追加失敗', getErrorMessage(e));
       throw e;
     }
   };
@@ -138,8 +140,8 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       await api.updateProduct(id, updates);
       await refreshProducts();
       addToast('success', '製品更新', '製品情報を更新しました');
-    } catch (e: any) {
-      addToast('error', '更新失敗', e.message);
+    } catch (e) {
+      addToast('error', '更新失敗', getErrorMessage(e));
       throw e;
     }
   };
@@ -149,8 +151,8 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       await api.deleteProduct(id);
       await refreshProducts();
       addToast('info', '製品削除', '製品を削除しました');
-    } catch (e: any) {
-      addToast('error', '削除失敗', e.message);
+    } catch (e) {
+      addToast('error', '削除失敗', getErrorMessage(e));
       throw e;
     }
   };
@@ -160,8 +162,8 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       await api.addNews(newsData);
       await refreshNews();
       addToast('success', 'お知らせ追加', '新しいお知らせを登録しました');
-    } catch (e: any) {
-      addToast('error', '追加失敗', e.message);
+    } catch (e) {
+      addToast('error', '追加失敗', getErrorMessage(e));
       throw e;
     }
   };
@@ -171,8 +173,8 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       await api.deleteNews(id);
       await refreshNews();
       addToast('info', '削除完了', 'お知らせを削除しました');
-    } catch (e: any) {
-      addToast('error', '削除失敗', e.message);
+    } catch (e) {
+      addToast('error', '削除失敗', getErrorMessage(e));
       throw e;
     }
   };
@@ -182,8 +184,8 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       setSystemInfo(info);
       await api.saveSystemInfo(info);
       addToast('success', '設定保存', 'システム情報を更新しました');
-    } catch (e: any) {
-      addToast('error', '保存失敗', e.message);
+    } catch (e) {
+      addToast('error', '保存失敗', getErrorMessage(e));
       throw e;
     }
   };
@@ -200,8 +202,8 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       } else {
         router.push('/login');
       }
-    } catch (e: any) {
-      addToast('error', 'エラー', e.message);
+    } catch (e) {
+      addToast('error', 'エラー', getErrorMessage(e));
     } finally {
       setIsLoading(false);
     }

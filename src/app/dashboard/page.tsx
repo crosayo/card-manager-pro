@@ -24,7 +24,7 @@ export default function DashboardPage() {
           api.fetchPendingRequestsCount(),
         ]);
         setStats({ ...data, pendingRequests });
-      } catch (e: any) {
+      } catch (e) {
         console.error("Failed to fetch stats", e);
         setError("データの取得に失敗しました。");
       } finally {

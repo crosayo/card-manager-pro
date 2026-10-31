@@ -4,7 +4,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { Database, X, LayoutDashboard, Layers, Menu, Download, Settings, LogOut, LogIn, Calendar, ChevronDown, ChevronRight, Folder, Info, ScrollText, ShoppingBag, Package, Inbox, Link2 } from 'lucide-react';
+import { Database, X, LayoutDashboard, Layers, Menu, Download, Settings, LogOut, LogIn, Calendar, ChevronDown, ChevronRight, Folder, Info, ScrollText, ShoppingBag, Package, Inbox, Link2, type LucideIcon } from 'lucide-react';
 import { Product, TabType } from '@/types';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/services/api';
@@ -42,7 +42,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const selectedCategory = selectedCategoryProp ?? (categoryParam ? decodeURIComponent(categoryParam) : null);
 
   // adminOnly: true の項目はゲストには非表示
-  const menuItems: { id: TabType; path: string; icon: any; label: string; adminOnly: boolean; guestOnly?: boolean; badge?: boolean }[] = [
+  const menuItems: { id: TabType; path: string; icon: LucideIcon; label: string; adminOnly: boolean; guestOnly?: boolean; badge?: boolean }[] = [
     { id: 'dashboard', path: '/dashboard', icon: LayoutDashboard, label: 'ダッシュボード', adminOnly: false },
     { id: 'inventory', path: '/inventory', icon: Layers, label: '在庫一覧', adminOnly: false },
     { id: 'supplies', path: '/supplies', icon: Package, label: 'サプライ', adminOnly: false },

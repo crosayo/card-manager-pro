@@ -8,6 +8,7 @@ import { api } from '@/services/api';
 import { useAppContext } from '@/context/AppContext';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { buildInviteUrl } from '@/lib/invite';
+import { getErrorMessage } from '@/utils';
 
 // 有効期間の選択肢（日数）
 const PERIODS: { days: number; label: string }[] = [
@@ -92,8 +93,8 @@ export const InvitesView: React.FC = () => {
     setIsLoading(true);
     try {
       setInvites(await api.fetchInvites());
-    } catch (e: any) {
-      addToast('error', '招待リンクの取得に失敗しました', e.message);
+    } catch (e) {
+      addToast('error', '招待リンクの取得に失敗しました', getErrorMessage(e));
     } finally {
       setIsLoading(false);
     }
@@ -126,8 +127,8 @@ export const InvitesView: React.FC = () => {
       setLabel('');
       await copyLink(created);
       addToast('success', '招待リンクを発行しました', 'リンクをコピーしました。渡したい相手に送ってください。');
-    } catch (e: any) {
-      addToast('error', '発行に失敗しました', e.message);
+    } catch (e) {
+      addToast('error', '発行に失敗しました', getErrorMessage(e));
     } finally {
       setIsCreating(false);
     }
@@ -138,8 +139,8 @@ export const InvitesView: React.FC = () => {
       replaceInvites([await api.extendInvite(invite, extendDays)]);
       setExtendingId(null);
       addToast('success', '有効期限を延長しました');
-    } catch (e: any) {
-      addToast('error', '延長に失敗しました', e.message);
+    } catch (e) {
+      addToast('error', '延長に失敗しました', getErrorMessage(e));
     }
   };
 
@@ -150,16 +151,16 @@ export const InvitesView: React.FC = () => {
       replaceInvites([await api.setInviteAutoExtend(invite.id, next)]);
       addToast('success', next ? '自動延長をオンにしました' : '自動延長をオフにしました',
         next ? `アクセスされるたびに、その時点から${periodLabel(next)}有効になります。` : undefined);
-    } catch (e: any) {
-      addToast('error', '変更に失敗しました', e.message);
+    } catch (e) {
+      addToast('error', '変更に失敗しました', getErrorMessage(e));
     }
   };
 
   const changeAutoExtendDays = async (invite: Invite, newDays: number) => {
     try {
       replaceInvites([await api.setInviteAutoExtend(invite.id, newDays)]);
-    } catch (e: any) {
-      addToast('error', '変更に失敗しました', e.message);
+    } catch (e) {
+      addToast('error', '変更に失敗しました', getErrorMessage(e));
     }
   };
 
@@ -174,8 +175,8 @@ export const InvitesView: React.FC = () => {
         try {
           replaceInvites([await api.revokeInvite(invite.id)]);
           addToast('info', '招待リンクを取り消しました');
-        } catch (e: any) {
-          addToast('error', '取り消しに失敗しました', e.message);
+        } catch (e) {
+          addToast('error', '取り消しに失敗しました', getErrorMessage(e));
         }
       },
     });
@@ -194,8 +195,8 @@ export const InvitesView: React.FC = () => {
           setInvites(prev => prev.filter(i => i.id !== invite.id));
           setSelectedIds(prev => prev.filter(id => id !== invite.id));
           addToast('info', '招待リンクを削除しました');
-        } catch (e: any) {
-          addToast('error', '削除に失敗しました', e.message);
+        } catch (e) {
+          addToast('error', '削除に失敗しました', getErrorMessage(e));
         }
       },
     });
@@ -212,8 +213,8 @@ export const InvitesView: React.FC = () => {
       replaceInvites(await api.extendInvites(selectedInvites, extendDays));
       addToast('success', `${selectedInvites.length}件の有効期限を${periodLabel(extendDays)}延長しました`);
       setSelectedIds([]);
-    } catch (e: any) {
-      addToast('error', '一括延長に失敗しました', e.message);
+    } catch (e) {
+      addToast('error', '一括延長に失敗しました', getErrorMessage(e));
       load();
     } finally {
       setIsBulkWorking(false);
@@ -233,8 +234,8 @@ export const InvitesView: React.FC = () => {
           replaceInvites(await api.revokeInvites(selectedIds));
           addToast('info', `${selectedInvites.length}件の招待リンクを取り消しました`);
           setSelectedIds([]);
-        } catch (e: any) {
-          addToast('error', '一括取り消しに失敗しました', e.message);
+        } catch (e) {
+          addToast('error', '一括取り消しに失敗しました', getErrorMessage(e));
         } finally {
           setIsBulkWorking(false);
         }
@@ -250,8 +251,8 @@ export const InvitesView: React.FC = () => {
     try {
       const logs = await api.fetchInviteAccessLogs(invite.id);
       setLogsCache(prev => ({ ...prev, [invite.id]: logs }));
-    } catch (e: any) {
-      addToast('error', 'アクセス履歴の取得に失敗しました', e.message);
+    } catch (e) {
+      addToast('error', 'アクセス履歴の取得に失敗しました', getErrorMessage(e));
     } finally {
       setIsLoadingLogs(false);
     }

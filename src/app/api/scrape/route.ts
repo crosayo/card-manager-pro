@@ -1,6 +1,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getErrorMessage } from '@/utils';
 
 // ── HTML ユーティリティ ──────────────────────────────────────────
 function decodeEntities(str: string): string {
@@ -329,11 +330,11 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ items });
 
-  } catch (error: any) {
+  } catch (error) {
     console.error('Scrape API Error:', error);
     return NextResponse.json({
       error: 'Failed to process request',
-      details: error.message
+      details: getErrorMessage(error)
     }, { status: 500 });
   }
 }

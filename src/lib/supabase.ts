@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { captureInviteFromUrl, getInviteCode } from './invite';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -18,6 +18,7 @@ const fetchWithInvite: typeof fetch = (input, init) => {
   return fetch(input, { ...init, headers });
 };
 
-export const supabase = isSupabaseEnabled
+// 未設定時は undefined だが、利用側は ensureConnection() で確認してから使うため型は非 null とする
+export const supabase: SupabaseClient = isSupabaseEnabled
   ? createClient(supabaseUrl!, supabaseAnonKey!, { global: { fetch: fetchWithInvite } })
-  : (undefined as any);
+  : (undefined as unknown as SupabaseClient);

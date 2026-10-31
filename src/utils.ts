@@ -101,3 +101,19 @@ export async function compressImage(
     img.src = URL.createObjectURL(file);
   });
 }
+
+/**
+ * catch で受け取った値からエラーメッセージを取り出す。
+ * Error のほか、Supabase のエラーオブジェクト（message を持つ）にも対応する。
+ */
+export function getErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'object' && e !== null && 'message' in e && typeof e.message === 'string') return e.message;
+  return String(e);
+}
+
+/** catch で受け取った値からエラーコード（api.ts が付ける code など）を取り出す。無ければ undefined */
+export function getErrorCode(e: unknown): string | undefined {
+  if (typeof e === 'object' && e !== null && 'code' in e && typeof e.code === 'string') return e.code;
+  return undefined;
+}

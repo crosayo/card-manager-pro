@@ -1,13 +1,61 @@
 
+import type { Session } from '@supabase/supabase-js';
 import { supabase, isSupabaseEnabled } from '../lib/supabase';
 import { Item, Product, PaginatedItems, SortConfig, Season, News, SystemInfo, StockLog, CardRequest, RequestItem, RequestEditLog, Supply, Invite, InviteAccessLog } from '../types';
 import { INITIAL_RARITIES, INITIAL_SEASONS, INITIAL_SYSTEM_INFO } from '../constants';
-import { normalizeForStorage, toSearchKey, toSearchTokens } from '../utils';
+import { normalizeForStorage, toSearchKey, toSearchTokens, getErrorMessage } from '../utils';
 
 type ItemFilters = { category?: string | null, search?: string, showZeroStock?: boolean, rarities?: string[], rarityOrder?: string[] };
 
+// DBの行（snake_case）。supabase-js に DB の型定義を渡していないため、取得結果にはここで型を付ける
+type DbItem = { id: number; name: string; card_id: string; rarity: string; stock: number; category: string; updated_at: string | null };
+type DbProduct = { name: string; release_date: string | null; is_sidebar_visible: boolean | null };
+type DbSupply = {
+  id: number; name: string; category: Supply['category']; image_url: string | null; stock: number;
+  release_date: string | null; created_at: string; updated_at: string;
+};
+type DbStockLog = {
+  id: number; item_id: number | null; supply_id: number | null; delta: number; stock_after: number;
+  source: StockLog['source']; request_id: number | null; note: string | null; created_at: string;
+  items?: { name: string; card_id: string; rarity: string } | null;
+  supplies?: { name: string } | null;
+};
+type DbRequestItem = {
+  id: number; request_id: number; item_id: number | null; supply_id: number | null; quantity: number; unit_price: number | null;
+  items?: DbItem | null; supplies?: DbSupply | null;
+};
+type DbRequest = {
+  id: number; token?: string; requester_name: string; message: string | null; status: CardRequest['status'];
+  price_total: number | null; admin_memo: string | null; created_at: string; resolved_at: string | null;
+  request_items?: DbRequestItem[] | null;
+};
+type DbRequestEditLog = {
+  id: number; request_id: number; editor_name: string; field_changed: string;
+  old_value: string | null; new_value: string | null; created_at: string;
+};
+type DbInvite = {
+  id: number; code: string; label: string | null; expires_at: string; revoked_at: string | null; created_at: string;
+  last_used_at: string | null; use_count: number | null; auto_extend_days: number | null;
+};
+type DbInviteAccessLog = { id: number; invite_id: number; accessed_at: string; ip: string | null; user_agent: string | null };
+type DbNews = { id: number; content: string; type: News['type']; start_date?: string; end_date?: string | null; created_at?: string };
+
+// バックアップJSONの行（旧形式の snake_case と、アプリ形式の camelCase の両方を受け付ける）
+type BackupProduct = { name: string; release_date?: string; releaseDate?: string; is_sidebar_visible?: boolean; isSidebarVisible?: boolean };
+type BackupItem = {
+  id?: number; name: string; card_id?: string; cardId?: string; rarity: string; stock: number; category: string;
+  updated_at?: string; updatedAt?: string;
+};
+
+// Supabase が返すエラー（PostgrestError など）と、アプリ側で code・details を付けたエラー
+type DbError = { message?: string; code?: string; details?: string; hint?: string };
+type AppDbError = Error & { code?: string; details?: string };
+
+// RPC search_items の戻り値
+type SearchItemsResult = { data?: DbItem[]; count?: number } | null;
+
 // DBのマッピング
-const mapDbItemToAppItem = (dbItem: any): Item => ({
+const mapDbItemToAppItem = (dbItem: DbItem): Item => ({
   id: dbItem.id,
   name: dbItem.name,
   cardId: dbItem.card_id,
@@ -17,14 +65,14 @@ const mapDbItemToAppItem = (dbItem: any): Item => ({
   updatedAt: dbItem.updated_at || new Date().toISOString(),
 });
 
-const mapDbProductToAppProduct = (dbProduct: any): Product => ({
+const mapDbProductToAppProduct = (dbProduct: DbProduct): Product => ({
   id: dbProduct.name,
   name: dbProduct.name,
   releaseDate: dbProduct.release_date || '2000-01-01',
   isSidebarVisible: dbProduct.is_sidebar_visible ?? true,
 });
 
-const mapDbSupplyToAppSupply = (db: any): Supply => ({
+const mapDbSupplyToAppSupply = (db: DbSupply): Supply => ({
   id: db.id,
   name: db.name,
   category: db.category,
@@ -35,7 +83,7 @@ const mapDbSupplyToAppSupply = (db: any): Supply => ({
   updatedAt: db.updated_at,
 });
 
-const mapDbStockLogToAppStockLog = (db: any): StockLog => ({
+const mapDbStockLogToAppStockLog = (db: DbStockLog): StockLog => ({
   id: db.id,
   itemId: db.item_id,
   supplyId: db.supply_id,
@@ -51,7 +99,7 @@ const mapDbStockLogToAppStockLog = (db: any): StockLog => ({
   supplyName: db.supplies?.name ?? null,
 });
 
-const mapDbRequestItemToAppRequestItem = (db: any): RequestItem => ({
+const mapDbRequestItemToAppRequestItem = (db: DbRequestItem): RequestItem => ({
   id: db.id,
   requestId: db.request_id,
   itemId: db.item_id,
@@ -62,7 +110,7 @@ const mapDbRequestItemToAppRequestItem = (db: any): RequestItem => ({
   supply: db.supplies ? mapDbSupplyToAppSupply(db.supplies) : undefined,
 });
 
-const mapDbRequestToAppRequest = (db: any): CardRequest => ({
+const mapDbRequestToAppRequest = (db: DbRequest): CardRequest => ({
   id: db.id,
   token: db.token,
   requesterName: db.requester_name,
@@ -75,7 +123,7 @@ const mapDbRequestToAppRequest = (db: any): CardRequest => ({
   items: db.request_items ? db.request_items.map(mapDbRequestItemToAppRequestItem) : undefined,
 });
 
-const mapDbInviteToAppInvite = (db: any): Invite => ({
+const mapDbInviteToAppInvite = (db: DbInvite): Invite => ({
   id: db.id,
   code: db.code,
   label: db.label,
@@ -87,7 +135,7 @@ const mapDbInviteToAppInvite = (db: any): Invite => ({
   autoExtendDays: db.auto_extend_days ?? null,
 });
 
-const mapDbInviteAccessLog = (db: any): InviteAccessLog => ({
+const mapDbInviteAccessLog = (db: DbInviteAccessLog): InviteAccessLog => ({
   id: db.id,
   inviteId: db.invite_id,
   accessedAt: db.accessed_at,
@@ -100,7 +148,7 @@ const REQUEST_PUBLIC_COLUMNS = 'id, requester_name, message, status, price_total
 const requestSelect = (includeToken?: boolean) =>
   `${REQUEST_PUBLIC_COLUMNS}${includeToken ? ', token' : ''}, request_items(*, items(*), supplies(*))`;
 
-const mapDbNewsToAppNews =(dbNews: any): News => ({
+const mapDbNewsToAppNews =(dbNews: DbNews): News => ({
   id: dbNews.id,
   content: dbNews.content,
   type: dbNews.type,
@@ -109,11 +157,11 @@ const mapDbNewsToAppNews =(dbNews: any): News => ({
   createdAt: dbNews.created_at
 });
 
-const handleSupabaseError = (error: any, action: string) => {
+const handleSupabaseError = (error: DbError | null, action: string) => {
   if (!error) return;
   console.error(`Supabase Error [${action}]:`, error);
 
-  const err: any = new Error(error.message || `DBエラー: ${action}`);
+  const err: AppDbError = new Error(error.message || `DBエラー: ${action}`);
   err.code = error.code || 'UNKNOWN_DB_ERROR';
   err.details = error.details || error.hint || '';
   
@@ -129,15 +177,16 @@ const handleSupabaseError = (error: any, action: string) => {
 };
 
 // RPC関数が未登録かどうか（42883: PostgreSQL側 / PGRST202: PostgRESTのスキーマキャッシュ上に無い）
-const isMissingFunction = (error: any) => error?.code === '42883' || error?.code === 'PGRST202';
+const isMissingFunction = (error: DbError | null) => error?.code === '42883' || error?.code === 'PGRST202';
 
 // 複数件の更新結果から失敗分をまとめて1つのエラーにする
-const throwIfAnyFailed = (results: { error: any }[], action: string) => {
+const throwIfAnyFailed = (results: { error: DbError | null }[], action: string) => {
   const failed = results.filter(r => r.error);
   if (failed.length === 0) return;
   console.error(`Supabase Error [${action}]:`, failed.map(r => r.error));
-  const err: any = new Error(`${action}: ${results.length}件中${failed.length}件の更新に失敗しました。(${failed[0].error.message})`);
-  err.code = failed[0].error.code || 'PARTIAL_FAILURE';
+  const firstError = failed[0].error as DbError;
+  const err: AppDbError = new Error(`${action}: ${results.length}件中${failed.length}件の更新に失敗しました。(${firstError.message})`);
+  err.code = firstError.code || 'PARTIAL_FAILURE';
   throw err;
 };
 
@@ -145,7 +194,7 @@ let warnedMissingSearchRpc = false;
 
 const ensureConnection = () => {
   if (!isSupabaseEnabled || !supabase) {
-    const e: any = new Error("データベース接続設定が見つかりません。");
+    const e: AppDbError = new Error("データベース接続設定が見つかりません。");
     e.code = "NO_CONNECTION";
     throw e;
   }
@@ -153,9 +202,9 @@ const ensureConnection = () => {
 
 export const api = {
   // --- Auth ---
-  onAuthStateChange: (callback: (session: any) => void) => {
+  onAuthStateChange: (callback: (session: Session | null) => void) => {
     if (isSupabaseEnabled && supabase) {
-      return supabase.auth.onAuthStateChange((_event: any, session: any) => callback(session));
+      return supabase.auth.onAuthStateChange((_event, session) => callback(session));
     }
     return { data: { subscription: { unsubscribe: () => {} } } };
   },
@@ -338,7 +387,7 @@ export const api = {
 
   updateProduct: async (id: string, updates: Partial<Product>): Promise<Product> => {
     ensureConnection();
-    const dbUpdates: any = {};
+    const dbUpdates: Partial<DbProduct> = {};
     if (updates.releaseDate !== undefined) dbUpdates.release_date = updates.releaseDate;
     if (updates.isSidebarVisible !== undefined) dbUpdates.is_sidebar_visible = updates.isSidebarVisible;
 
@@ -408,15 +457,15 @@ export const api = {
     }
 
     return {
-      data:  ((rpcResult as any)?.data  || []).map(mapDbItemToAppItem),
-      count: (rpcResult  as any)?.count || 0,
+      data:  ((rpcResult as SearchItemsResult)?.data  || []).map(mapDbItemToAppItem),
+      count: (rpcResult  as SearchItemsResult)?.count || 0,
     };
   },
 
   // 内部用: 全件取得ヘルパー
   fetchAllItemsInternal: async (): Promise<Item[]> => {
     ensureConnection();
-    let allItems: any[] = [];
+    let allItems: DbItem[] = [];
     const PAGE_SIZE = 1000;
     let page = 0;
     let hasMore = true;
@@ -444,7 +493,7 @@ export const api = {
   addItem: async (newItem: Omit<Item, 'id' | 'updatedAt'>): Promise<Item> => {
     ensureConnection();
     // 追加時に正規化とサニタイズを適用
-    const payload: any = {
+    const payload: Omit<DbItem, 'id' | 'updated_at'> = {
         name: normalizeForStorage(newItem.name),
         card_id: normalizeForStorage(newItem.cardId), // 型番も正規化（半角統一）
         rarity: newItem.rarity,
@@ -495,7 +544,7 @@ export const api = {
 
   updateItem: async (id: number, updates: Partial<Item>): Promise<Item> => {
     ensureConnection();
-    const dbUpdates: any = {
+    const dbUpdates: Partial<DbItem> = {
       updated_at: new Date().toISOString()
     };
     // 更新時も正規化
@@ -522,7 +571,7 @@ export const api = {
   },
 
   // --- Bulk Operations ---
-  bulkInsertProducts: async (products: any[]): Promise<void> => {
+  bulkInsertProducts: async (products: BackupProduct[]): Promise<void> => {
     ensureConnection();
     const BATCH_SIZE = 500;
     
@@ -543,7 +592,7 @@ export const api = {
     }
   },
 
-  bulkInsertItems: async (items: any[]): Promise<void> => {
+  bulkInsertItems: async (items: BackupItem[]): Promise<void> => {
     ensureConnection();
     const BATCH_SIZE = 100;
     
@@ -551,7 +600,7 @@ export const api = {
     const normalizedItems = items.map(item => ({
       id: item.id, // バックアップからの復元時はIDを維持
       name: normalizeForStorage(item.name),
-      card_id: normalizeForStorage(item.card_id || item.cardId),
+      card_id: normalizeForStorage(item.card_id || item.cardId || ''),
       rarity: item.rarity,
       stock: item.stock,
       category: item.category,
@@ -567,7 +616,7 @@ export const api = {
     }
   },
 
-  restoreFromBackup: async (backupData: { products: any[], items: any[] }): Promise<void> => {
+  restoreFromBackup: async (backupData: { products: BackupProduct[], items: BackupItem[] }): Promise<void> => {
     ensureConnection();
     
     // 1. 製品マスタの復元
@@ -629,7 +678,7 @@ export const api = {
           .eq('id', t.id)
           .select('id')
       ));
-      responses.forEach(({ data, error }: any, idx: number) => {
+      responses.forEach(({ data, error }, idx: number) => {
         const t = chunk[idx];
         if (error) {
           result.failed.push({ id: t.id, message: error.message });
@@ -674,7 +723,7 @@ export const api = {
 
     // バッチ更新
     let failedCount = 0;
-    let firstError: any = null;
+    let firstError: DbError | null = null;
     for (let i = 0; i < updates.length; i += BATCH_SIZE) {
       const chunk = updates.slice(i, i + BATCH_SIZE);
       const responses = await Promise.all(chunk.map(u =>
@@ -693,7 +742,7 @@ export const api = {
 
     if (failedCount > 0) {
       console.error('normalizeAllItems: 更新失敗', firstError);
-      throw new Error(`${updateCount}件を正規化しましたが、${failedCount}件の更新に失敗しました。(${firstError.message})`);
+      throw new Error(`${updateCount}件を正規化しましたが、${failedCount}件の更新に失敗しました。(${firstError?.message})`);
     }
     return updateCount;
   },
@@ -701,7 +750,7 @@ export const api = {
   // --- Backup (Full Export) ---
   fetchAllItemsForBackup: async (onProgress?: (count: number) => void): Promise<Item[]> => {
     ensureConnection();
-    let allItems: any[] = [];
+    let allItems: DbItem[] = [];
     const PAGE_SIZE = 1000;
     let page = 0;
     let hasMore = true;
@@ -755,8 +804,8 @@ export const api = {
           lowStock: data.lowStock || 0
         };
       }
-    } catch (e: any) {
-      console.warn("RPC failed, falling back to standard queries.", e.message);
+    } catch (e) {
+      console.warn("RPC failed, falling back to standard queries.", getErrorMessage(e));
       const { count: totalCards } = await supabase.from('items').select('id', { count: 'exact', head: true });
       const { count: lowStock } = await supabase.from('items').select('id', { count: 'exact', head: true }).lt('stock', 2);
       return { totalCards: totalCards || 0, totalStock: 0, lowStock: lowStock || 0 };
@@ -827,7 +876,7 @@ export const api = {
     try {
       const { data, error } = await supabase.rpc('get_distinct_rarities');
       if (error) throw error;
-      return (data || []).map((row: any) => row.rarity).filter(Boolean);
+      return (data || []).map((row: { rarity: string | null }) => row.rarity).filter((r: string | null): r is string => !!r);
     } catch {
       console.warn("RPC 'get_distinct_rarities' not found.");
       throw new Error("レアリティの集計に失敗しました。");
@@ -923,7 +972,7 @@ export const api = {
     ensureConnection();
     let query = supabase
       .from('requests')
-      .select(requestSelect(options?.includeToken))
+      .select<string, DbRequest>(requestSelect(options?.includeToken))
       .order('created_at', { ascending: false });
     if (status) query = query.eq('status', status);
     const { data, error } = await query;
@@ -938,11 +987,11 @@ export const api = {
     ensureConnection();
     const { data, error } = await supabase
       .from('requests')
-      .select(requestSelect(options?.includeToken))
+      .select<string, DbRequest>(requestSelect(options?.includeToken))
       .eq('id', id)
       .single();
     if (error) handleSupabaseError(error, 'fetchRequestById');
-    return mapDbRequestToAppRequest(data);
+    return mapDbRequestToAppRequest(data as DbRequest); // エラー時は上で例外になる
   },
 
   // リクエスト送信。本体と明細をDB関数で一括登録し、編集用トークンを受け取る
@@ -1041,7 +1090,7 @@ export const api = {
     }
   ): Promise<CardRequest> => {
     ensureConnection();
-    const updates: any = {
+    const updates: Partial<DbRequest> = {
       status,
       resolved_at: new Date().toISOString(),
     };
@@ -1159,7 +1208,7 @@ export const api = {
       if (error.code === '42P01') return [];
       handleSupabaseError(error, 'fetchRequestEditLogs');
     }
-    return (data || []).map((db: any): RequestEditLog => ({
+    return (data || []).map((db: DbRequestEditLog): RequestEditLog => ({
       id: db.id,
       requestId: db.request_id,
       editorName: db.editor_name,
@@ -1217,7 +1266,7 @@ export const api = {
 
   updateSupply: async (id: number, params: Partial<Pick<Supply, 'name' | 'category' | 'releaseDate' | 'stock'>>): Promise<Supply> => {
     ensureConnection();
-    const updates: any = {};
+    const updates: Partial<DbSupply> = {};
     if (params.name !== undefined) updates.name = params.name;
     if (params.category !== undefined) updates.category = params.category;
     if (params.releaseDate !== undefined) updates.release_date = params.releaseDate;

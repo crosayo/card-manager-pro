@@ -7,6 +7,7 @@ import { useCart } from '@/context/CartContext';
 import { api } from '@/services/api';
 import { useAppContext } from '@/context/AppContext';
 import { buildRequestEditUrl, saveRequestToken } from '@/lib/requestTokens';
+import { getErrorMessage } from '@/utils';
 
 export const CartFloat: React.FC = () => {
   const { cartItems, removeFromCart, updateQuantity, clearCart, totalCount } = useCart();
@@ -131,8 +132,8 @@ export const CartFloat: React.FC = () => {
       } else {
         addToast('success', 'リクエスト送信完了', 'リクエストを受け付けました。リクエスト一覧で確認できます。');
       }
-    } catch (e: any) {
-      addToast('error', '送信失敗', e.message);
+    } catch (e) {
+      addToast('error', '送信失敗', getErrorMessage(e));
     } finally {
       setIsSending(false);
     }

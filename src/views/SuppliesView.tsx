@@ -9,6 +9,7 @@ import { Supply, SUPPLY_CATEGORY_LABELS } from '@/types';
 import { useAppContext } from '@/context/AppContext';
 import { useCart } from '@/context/CartContext';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { getErrorMessage } from '@/utils';
 
 const CATEGORY_ORDER: Supply['category'][] = ['sleeve', 'playmat', 'other'];
 
@@ -61,8 +62,8 @@ export const SuppliesView: React.FC = () => {
       try {
         const data = await api.fetchSupplies();
         setSupplies(data);
-      } catch (e: any) {
-        addToast('error', 'データ取得エラー', e.message);
+      } catch (e) {
+        addToast('error', 'データ取得エラー', getErrorMessage(e));
       } finally {
         setIsLoading(false);
       }
@@ -115,8 +116,8 @@ export const SuppliesView: React.FC = () => {
         return { ...updated, stock: Math.max(0, updated.stock + stillPending) };
       }));
       api.addStockLog({ supplyId: id, delta: totalDelta, stockAfter: updated.stock, source: 'manual' }).catch(() => {});
-    } catch (e: any) {
-      addToast('error', '在庫更新失敗', e.message);
+    } catch (e) {
+      addToast('error', '在庫更新失敗', getErrorMessage(e));
       api.fetchSupplies().then(setSupplies).catch(() => {});
     }
   };
@@ -146,8 +147,8 @@ export const SuppliesView: React.FC = () => {
       setUploadTarget(added);
       setImageFile(null);
       setImagePreview(null);
-    } catch (e: any) {
-      addToast('error', '登録失敗', e.message);
+    } catch (e) {
+      addToast('error', '登録失敗', getErrorMessage(e));
     } finally {
       setIsSaving(false);
     }
@@ -165,8 +166,8 @@ export const SuppliesView: React.FC = () => {
       setSupplies(prev => prev.map(s => s.id === editTarget.id ? { ...updated, imageUrl: s.imageUrl } : s));
       closeModal();
       addToast('success', '更新完了', `「${updated.name}」を更新しました。`);
-    } catch (e: any) {
-      addToast('error', '更新失敗', e.message);
+    } catch (e) {
+      addToast('error', '更新失敗', getErrorMessage(e));
     } finally {
       setIsSaving(false);
     }
@@ -184,8 +185,8 @@ export const SuppliesView: React.FC = () => {
           await api.deleteSupply(supply.id);
           setSupplies(prev => prev.filter(s => s.id !== supply.id));
           addToast('info', '削除完了', `「${supply.name}」を削除しました。`);
-        } catch (e: any) {
-          addToast('error', '削除失敗', e.message);
+        } catch (e) {
+          addToast('error', '削除失敗', getErrorMessage(e));
         }
       }
     });
@@ -208,8 +209,8 @@ export const SuppliesView: React.FC = () => {
       setUploadTarget(null);
       setImageFile(null);
       setImagePreview(null);
-    } catch (e: any) {
-      addToast('error', 'アップロード失敗', e.message);
+    } catch (e) {
+      addToast('error', 'アップロード失敗', getErrorMessage(e));
     } finally {
       setIsUploading(false);
     }

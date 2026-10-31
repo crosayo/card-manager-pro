@@ -6,7 +6,7 @@ import { Download, Zap, RefreshCw, Check, LoaderCircle, Save, Trash, Copy, Plus,
 import { AppError, ToastType, Item } from '../types';
 import { api } from '../services/api';
 import { useAppContext } from '../context/AppContext';
-import { normalizeCardName, normalizeForStorage } from '../utils';
+import { normalizeCardName, normalizeForStorage, getErrorMessage } from '../utils';
 
 interface ScraperViewProps {
   isLoading: boolean;
@@ -63,7 +63,6 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
   const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
   const [conflicts, setConflicts] = useState<ConflictItem[]>([]);
   const [safeItems, setSafeItems] = useState<ScrapedItem[]>([]);
-  const [isProcessingConflicts, setIsProcessingConflicts] = useState(false);
 
   const loadPreset = (presetUrl: string) => {
     setUrl(presetUrl);
@@ -92,7 +91,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
       throw new Error('有効なデータが見つかりませんでした');
     }
 
-    return data.items.map((item: any) => ({
+    return data.items.map((item: Partial<Omit<Item, 'id' | 'updatedAt'>>) => ({
       name: normalizeForStorage(item.name || ''),
       cardId: normalizeForStorage(item.cardId || ''),
       rarity: item.rarity || 'N',
@@ -135,10 +134,10 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
         addToast('success', '解析完了', `${itemsWithIds.length}件のカード情報が見つかりました。`);
       }
 
-    } catch (e: any) {
-      addToast('error', 'Wiki解析エラー', e.message, {
+    } catch (e) {
+      addToast('error', 'Wiki解析エラー', getErrorMessage(e), {
         code: 'SCRAPE_ERROR',
-        message: e.message,
+        message: getErrorMessage(e),
         timestamp: new Date().toLocaleString()
       });
     } finally {
@@ -153,8 +152,8 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
       const itemsWithIds = await fetchAndParseUrl(url);
       setScrapedItems(itemsWithIds);
       addToast('success', '再解析完了', `${itemsWithIds.length}件のデータを取得しました。`);
-    } catch (e: any) {
-      addToast('error', '再解析エラー', e.message);
+    } catch (e) {
+      addToast('error', '再解析エラー', getErrorMessage(e));
       // 既存の結果は維持する
     } finally {
       setIsAnalyzing(false);
@@ -215,8 +214,8 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
         executeImport(safeList, []);
       }
 
-    } catch (e: any) {
-       addToast('error', 'チェック失敗', e.message);
+    } catch (e) {
+       addToast('error', 'チェック失敗', getErrorMessage(e));
        setImportStatus('idle');
     }
   };
@@ -282,8 +281,8 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
       setImportStatus('done');
       setIsConflictModalOpen(false);
 
-    } catch (e: any) {
-      addToast('error', 'インポート失敗', `処理中にエラーが発生しました: ${e.message}`);
+    } catch (e) {
+      addToast('error', 'インポート失敗', `処理中にエラーが発生しました: ${getErrorMessage(e)}`);
       setImportStatus('idle');
     }
   };
@@ -301,7 +300,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
   };
 
   // IDベースでの更新（indexベースより確実）
-  const updateItem = (id: string, field: keyof ScrapedItem, value: any) => {
+  const updateItem = <K extends keyof ScrapedItem>(id: string, field: K, value: ScrapedItem[K]) => {
     setScrapedItems(prev => prev.map(item => 
       item._tempId === id ? { ...item, [field]: value } : item
     ));
