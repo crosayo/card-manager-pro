@@ -91,7 +91,7 @@ const ToastItem: React.FC<ToastItemProps> = ({ toast, onClose }) => {
 
 export const ToastContainer: React.FC<{ toasts: ToastType[], removeToast: (id: number) => void }> = ({ toasts, removeToast }) => {
   return (
-    <div className="fixed top-4 right-4 z-50 flex flex-col gap-3 w-full max-w-md pointer-events-none px-4 md:px-0">
+    <div className="fixed top-4 right-4 z-50 flex flex-col gap-3 w-full max-w-md pointer-events-none px-4 md:px-0 print:hidden">
       {toasts.map(toast => (
         <ToastItem key={toast.id} toast={toast} onClose={() => removeToast(toast.id)} />
       ))}

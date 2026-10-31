@@ -3,7 +3,8 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ShoppingBag, LoaderCircle, ChevronDown, ChevronRight, Check, X, PenLine, Trash, RefreshCw, Link2, Info, Undo2, TriangleAlert } from 'lucide-react';
+import Link from 'next/link';
+import { ShoppingBag, ClipboardList, LoaderCircle, ChevronDown, ChevronRight, Check, X, PenLine, Trash, RefreshCw, Link2, Info, Undo2, TriangleAlert } from 'lucide-react';
 import { CardRequest, Item, RequestItem, RequestEditLog } from '@/types';
 import { api } from '@/services/api';
 import { useAppContext } from '@/context/AppContext';
@@ -481,7 +482,16 @@ export const RequestsView: React.FC = () => {
 
   return (
     <PageContainer>
-      <PageHeader icon={ShoppingBag} title="リクエスト一覧" />
+      <PageHeader icon={ShoppingBag} title="リクエスト一覧">
+        {isAdmin && (
+          <Link
+            href="/requests/picking"
+            className="px-4 py-2 text-sm text-white font-bold bg-cyan-600 hover:bg-cyan-700 rounded-lg flex items-center gap-1"
+          >
+            <ClipboardList size={16} /> ピッキングリスト
+          </Link>
+        )}
+      </PageHeader>
 
       {/* フィルター */}
       {isAdmin ? (

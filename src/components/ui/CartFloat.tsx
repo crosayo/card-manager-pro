@@ -143,7 +143,7 @@ export const CartFloat: React.FC = () => {
   return (
     <>
       {/* フローティングボタン */}
-      <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2">
+      <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2 print:hidden">
         {/* カートポップアップ */}
         {isOpen && (
           <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-80 max-h-96 flex flex-col animate-in slide-in-from-bottom-2 duration-200">

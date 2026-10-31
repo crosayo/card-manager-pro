@@ -137,7 +137,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )}
       
       <div className={`
-        fixed top-0 left-0 h-screen w-64 bg-slate-900 text-white flex flex-col shadow-xl z-30 transition-transform duration-300 ease-in-out
+        fixed top-0 left-0 h-screen w-64 bg-slate-900 text-white flex flex-col shadow-xl z-30 transition-transform duration-300 ease-in-out print:hidden
         ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0
       `}>
         <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-950">

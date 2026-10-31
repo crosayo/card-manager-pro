@@ -73,7 +73,7 @@ const MainLayout = ({ children }: { children: React.ReactNode }) => {
     <div className="flex min-h-screen bg-slate-100 text-slate-800 font-sans">
       <ToastContainer toasts={toasts} removeToast={removeToast} />
 
-      <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-slate-900 z-20 flex items-center justify-between px-4 shadow-md">
+      <div className="md:hidden print:hidden fixed top-0 left-0 right-0 h-16 bg-slate-900 z-20 flex items-center justify-between px-4 shadow-md">
          <div className="flex items-center gap-2 text-cyan-400 font-bold">
            <Database size={20} />
            <span>Card Manager</span>
@@ -83,7 +83,7 @@ const MainLayout = ({ children }: { children: React.ReactNode }) => {
          </button>
       </div>
 
-      <Suspense fallback={<div className="fixed top-0 left-0 h-screen w-64 bg-slate-900" />}>
+      <Suspense fallback={<div className="fixed top-0 left-0 h-screen w-64 bg-slate-900 print:hidden" />}>
         <Sidebar
           isMobileMenuOpen={isMobileMenuOpen}
           setIsMobileMenuOpen={setIsMobileMenuOpen}
@@ -94,7 +94,7 @@ const MainLayout = ({ children }: { children: React.ReactNode }) => {
         />
       </Suspense>
 
-      <div className="md:ml-64 flex-1 relative pt-16 md:pt-0">
+      <div className="md:ml-64 flex-1 relative pt-16 md:pt-0 print:!ml-0 print:!pt-0">
         {children}
         <CartFloat />
       </div>
