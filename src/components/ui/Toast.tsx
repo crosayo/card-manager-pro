@@ -11,21 +11,17 @@ interface ToastItemProps {
 }
 
 const ToastItem: React.FC<ToastItemProps> = ({ toast, onClose }) => {
-  const [expanded, setExpanded] = useState(false);
+  // エラー時は最初から詳細を開く
+  const [expanded, setExpanded] = useState(toast.type === 'error' && !!toast.errorDetail);
   const [copied, setCopied] = useState(false);
-  
+
   useEffect(() => {
     // エラー以外は自動で閉じる
     if (toast.type !== 'error') {
       const timer = setTimeout(onClose, 5000);
       return () => clearTimeout(timer);
-    } else {
-      // エラー時は自動で詳細を開く
-      if (toast.errorDetail) {
-        setExpanded(true);
-      }
     }
-  }, [onClose, toast.type, toast.errorDetail]);
+  }, [onClose, toast.type]);
 
   const handleCopyError = () => {
     if (!toast.errorDetail) return;

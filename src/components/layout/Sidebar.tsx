@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Database, X, LayoutDashboard, Layers, Menu, Download, Settings, LogOut, LogIn, Calendar, ChevronDown, ChevronRight, Folder, Info, ScrollText, ShoppingBag, Package, Inbox, Link2, type LucideIcon } from 'lucide-react';
@@ -35,7 +35,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
   const [isSuppliesOpen, setIsSuppliesOpen] = useState(false);
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
-  const initializedRef = useRef(false);
+  const [isSeasonsInitialized, setIsSeasonsInitialized] = useState(false);
+  const [prevSelectedCategory, setPrevSelectedCategory] = useState<string | null>(null);
 
   // URLパラメータからselectedCategoryを取得（propsが未指定の場合も対応）
   const categoryParam = searchParams.get('category');
@@ -95,13 +96,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // 管理者ログイン時に未対応リクエスト件数を取得
   useEffect(() => {
-    if (!isAdmin) { setPendingRequestsCount(0); return; }
+    if (!isAdmin) return;
     api.fetchPendingRequestsCount().then(setPendingRequestsCount).catch(() => {});
   }, [isAdmin]);
+  const pendingBadgeCount = isAdmin ? pendingRequestsCount : 0;
 
-  useEffect(() => {
+  // 以下2つは描画中に前回の値と比べて展開状態を調整する（effect で setState すると描画が二度走るため）
+  if (selectedCategory !== prevSelectedCategory) {
+    setPrevSelectedCategory(selectedCategory);
     if (selectedCategory) {
       // selectedCategoryに対応するシーズンだけを展開する（手動で折りたたんだシーズンは強制展開しない）
+      // groupedProductsの変化（データ取得完了など）だけでは展開状態をリセットしない
       for (const [seasonName, prods] of Object.entries(groupedProducts) as [string, Product[]][]) {
         if (prods.some(p => p.name === selectedCategory)) {
           setExpandedSeasons(prev => ({ ...prev, [seasonName]: true }));
@@ -109,18 +114,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }
       }
     }
-  }, [selectedCategory]); // groupedProductsの変化（データ取得完了など）だけでは展開状態をリセットしない
+  }
 
-  useEffect(() => {
-    // 初回のみ: 最初のシーズンを展開する
-    if (!initializedRef.current && !selectedCategory) {
-      const firstAvailableSeason = seasons.find(s => groupedProducts[s.name]?.length > 0);
-      if (firstAvailableSeason) {
-        setExpandedSeasons({ [firstAvailableSeason.name]: true });
-        initializedRef.current = true;
-      }
+  // 初回のみ: 最初のシーズンを展開する
+  if (!isSeasonsInitialized && !selectedCategory) {
+    const firstAvailableSeason = seasons.find(s => groupedProducts[s.name]?.length > 0);
+    if (firstAvailableSeason) {
+      setExpandedSeasons({ [firstAvailableSeason.name]: true });
+      setIsSeasonsInitialized(true);
     }
-  }, [seasons, groupedProducts, selectedCategory]);
+  }
 
   const toggleSeason = (seasonName: string) => {
     setExpandedSeasons(prev => ({
@@ -190,9 +193,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   >
                     <item.icon size={18} />
                     <span className="flex-1">{item.label}</span>
-                    {item.badge && pendingRequestsCount > 0 && (
+                    {item.badge && pendingBadgeCount > 0 && (
                       <span className="bg-red-500 text-white text-xs font-bold rounded-full px-1.5 py-0.5 min-w-[20px] text-center leading-none">
-                        {Math.min(pendingRequestsCount, 99)}
+                        {Math.min(pendingBadgeCount, 99)}
                       </span>
                     )}
                   </Link>

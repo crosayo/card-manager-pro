@@ -762,33 +762,36 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isSavingWebhook, setIsSavingWebhook] = useState(false);
   const [isTestingSending, setIsTestingSending] = useState(false);
 
-  // Sync state with context
-  useEffect(() => {
+  // Sync state with context（描画中に前回の値と比べて調整する。effect で setState すると描画が二度走るため）
+  const [prevRarities, setPrevRarities] = useState(rarities);
+  if (rarities !== prevRarities) {
+    setPrevRarities(rarities);
     const isRemoteRarityDefault = JSON.stringify(rarities) === JSON.stringify(INITIAL_RARITIES);
     const isLocalRarityDefault = JSON.stringify(localRarities) === JSON.stringify(INITIAL_RARITIES);
 
     if (!isRemoteRarityDefault && isLocalRarityDefault) {
       setLocalRarities(rarities);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rarities]);
+  }
 
-  useEffect(() => {
+  const [prevSeasons, setPrevSeasons] = useState(seasons);
+  if (seasons !== prevSeasons) {
+    setPrevSeasons(seasons);
     const isRemoteSeasonsDefault = JSON.stringify(seasons) === JSON.stringify(INITIAL_SEASONS);
     const isLocalSeasonsDefault = JSON.stringify(localSeasons) === JSON.stringify(INITIAL_SEASONS);
 
     if (!isRemoteSeasonsDefault && isLocalSeasonsDefault) {
       setLocalSeasons(seasons);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seasons]);
+  }
 
-  useEffect(() => {
-     if (systemInfo.version !== localSystemInfo.version) {
-       setLocalSystemInfo(systemInfo);
-     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [systemInfo]);
+  const [prevSystemInfo, setPrevSystemInfo] = useState(systemInfo);
+  if (systemInfo !== prevSystemInfo) {
+    setPrevSystemInfo(systemInfo);
+    if (systemInfo.version !== localSystemInfo.version) {
+      setLocalSystemInfo(systemInfo);
+    }
+  }
 
   // Discord Webhook URL の読み込み
   useEffect(() => {

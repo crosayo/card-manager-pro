@@ -92,7 +92,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
   // 登録モーダル内: 既存カード検索（別カテゴリへの別レアリティ追加用）
   const [cardSearchKeyword, setCardSearchKeyword] = useState('');
   const [cardSearchResults, setCardSearchResults] = useState<Item[]>([]);
-  const [isCardSearching, setIsCardSearching] = useState(false);
+  const [searchedCardKeyword, setSearchedCardKeyword] = useState(''); // 結果が出ているキーワード
 
   const totalPages = Math.ceil(totalCount / pageSize);
 
@@ -120,12 +120,12 @@ export const InventoryList: React.FC<InventoryListProps> = ({
   };
 
   // 登録モーダル内の既存カード検索（デバウンス付き）
+  // 検索中か・結果を出すかは描画時に求める（effect の中で同期的に setState しない）
+  const isCardSearchActive = isModalOpen && !editingItem && cardSearchKeyword.trim() !== '';
+  const isCardSearching = isCardSearchActive && searchedCardKeyword !== cardSearchKeyword;
+  const visibleCardSearchResults = isCardSearchActive ? cardSearchResults : [];
   useEffect(() => {
-    if (!isModalOpen || editingItem || !cardSearchKeyword.trim()) {
-      setCardSearchResults([]);
-      return;
-    }
-    setIsCardSearching(true);
+    if (!isCardSearchActive) return;
     const timer = setTimeout(async () => {
       try {
         const result = await api.fetchItems(1, 8, { search: cardSearchKeyword });
@@ -133,11 +133,11 @@ export const InventoryList: React.FC<InventoryListProps> = ({
       } catch {
         setCardSearchResults([]);
       } finally {
-        setIsCardSearching(false);
+        setSearchedCardKeyword(cardSearchKeyword);
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [cardSearchKeyword, isModalOpen, editingItem]);
+  }, [cardSearchKeyword, isCardSearchActive]);
 
   // 検索候補を選んでフォームに反映（別カテゴリへの別レアリティ追加を想定）
   const selectSearchedCard = (item: Item) => {
@@ -1029,9 +1029,9 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                     />
                     {isCardSearching && <LoaderCircle size={14} className="animate-spin text-slate-400 shrink-0" />}
                   </div>
-                  {cardSearchResults.length > 0 && (
+                  {visibleCardSearchResults.length > 0 && (
                     <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-10 max-h-56 overflow-y-auto">
-                      {cardSearchResults.map(result => (
+                      {visibleCardSearchResults.map(result => (
                         <button
                           type="button"
                           key={result.id}

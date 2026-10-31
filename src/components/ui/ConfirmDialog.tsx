@@ -31,9 +31,15 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // 開いたときに入力欄を空にする（描画中に前回の isOpen と比べて調整する）
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+  if (isOpen !== prevIsOpen) {
+    setPrevIsOpen(isOpen);
+    if (isOpen) setInputValue('');
+  }
+
   useEffect(() => {
     if (isOpen) {
-      setInputValue('');
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [isOpen]);
