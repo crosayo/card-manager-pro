@@ -27,7 +27,8 @@ function extractAnchorText(cellHtml: string): string {
 }
 
 // 「26LP-JP001」のように数字始まりの型番もあるため、英字を1文字以上含む英数字を許容する
-const CARD_ID_RE = /\b((?=[0-9]*[A-Z])[A-Z0-9]+-JP\d{3,4})\b/;
+// 「IMPH-JPS01」（＋1パック）「IMPH-JPT01」（トークン）のようにJPの後に英字が入る型番も拾う
+const CARD_ID_RE = /\b((?=[0-9]*[A-Z])[A-Z0-9]+-JP(?:\d{3,4}|[A-Z]\d{2,3}))\b/;
 
 interface RawEntry {
   cardId: string;
