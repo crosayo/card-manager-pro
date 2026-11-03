@@ -26,7 +26,8 @@ function extractAnchorText(cellHtml: string): string {
   return decodeEntities(m[1].replace(/<[^>]+>/g, '').trim());
 }
 
-const CARD_ID_RE = /\b([A-Z][A-Z0-9]*-JP\d{3,4})\b/;
+// 「26LP-JP001」のように数字始まりの型番もあるため、英字を1文字以上含む英数字を許容する
+const CARD_ID_RE = /\b((?=[0-9]*[A-Z])[A-Z0-9]+-JP\d{3,4})\b/;
 
 interface RawEntry {
   cardId: string;
