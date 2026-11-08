@@ -49,14 +49,35 @@ function execAll(str: string, pattern: RegExp): RegExpExecArray[] {
 // 複合レアリティを先にスキャンして除去し、残りでノーマル・レアを判定する
 // 「○○ Rare」の「Rare」を省略した英語表記（例: 単に "Ultra" "Secret"）も
 // wiki上でよく使われるため、\bによる単語単位マッチも併記して拾う
+// コードは公式カードデータベースの略号にそろえる（2026-11-08 レアリティ整理。constants.ts の INITIAL_RARITIES）。
+// 長い名前（複合）を先に置く。先に一致した部分は除去されるので、たとえば
+// 「プリズマティックシークレットレア」が「シークレットレア」として二重に拾われることはない。
 const COMPOUND_RARITY_PATTERNS: Array<{ pattern: RegExp; code: string }> = [
-  { pattern: /クォーターセンチュリーシークレットレア|quarter.?century.?secret|25th.?se/gi, code: '25thSE' },
-  { pattern: /プリズマティックシークレットレア|prismatic.?secret/gi,                        code: 'PS' },
+  { pattern: /クォーターセンチュリーシークレットレア|quarter.?century.?secret(?:.?rare)?|25th.?se/gi, code: 'QCSE' },
+  { pattern: /プリズマティックシークレットレア|prismatic.?secret(?:.?rare)?/gi,                        code: 'PSE' },
+  { pattern: /エクストラシークレットレア|extra.?secret(?:.?rare)?/gi,                                  code: 'EXSE' },
+  { pattern: /20thシークレットレア|20th.?secret(?:.?rare)?/gi,                                        code: '20thSE' },
+  { pattern: /10000シークレットレア|10000.?secret(?:.?rare)?/gi,                                      code: '10000SE' },
+  { pattern: /ゴールドシークレットレア|gold.?secret(?:.?rare)?/gi,                                     code: 'GSE' },
+  { pattern: /プレミアムゴールドレア|premium.?gold(?:.?rare)?/gi,                                     code: 'PG' },
+  { pattern: /グランドマスターレア|grand.?master(?:.?rare)?/gi,                                       code: 'GMR' },
+  { pattern: /ミレニアムシークレットレア|millennium.?secret(?:.?rare)?/gi,                             code: 'M+SE' },
+  { pattern: /ミレニアムウルトラレア|millennium.?ultra(?:.?rare)?/gi,                                  code: 'M+UR' },
+  { pattern: /ミレニアムスーパーレア|millennium.?super(?:.?rare)?/gi,                                  code: 'M+SR' },
+  { pattern: /ミレニアムレア|millennium.?rare/gi,                                           code: 'M' },
+  { pattern: /KCウルトラレア|kc.?ultra(?:.?rare)?/gi,                                                  code: 'KC+UR' },
+  { pattern: /シークレットパラレルレア|secret.?parallel(?:.?rare)?/gi,                                 code: 'P+SE' },
+  { pattern: /ウルトラパラレルレア|ultra.?parallel(?:.?rare)?/gi,                                      code: 'P+UR' },
+  { pattern: /スーパーパラレルレア|super.?parallel(?:.?rare)?/gi,                                      code: 'P+SR' },
+  { pattern: /ホログラフィックパラレルレア|holographic.?parallel(?:.?rare)?/gi,                        code: 'P+HR' },
+  { pattern: /ホログラフィックレア|holographic.?rare|ghost.?rare/gi,                        code: 'HR' },
+  { pattern: /コレクターズレア|collector'?s.?rare/gi,                                       code: 'CR' },
+  { pattern: /ゴールドレア|gold.?rare/gi,                                                   code: 'GR' },
   { pattern: /アルティメットレア|ultimate.?rare|\bultimate\b/gi,                            code: 'UL' },
   { pattern: /シークレットレア|secret.?rare|\bsecret\b/gi,                                  code: 'SE' },
   { pattern: /ウルトラレア|ultra.?rare|\bultra\b/gi,                                        code: 'UR' },
   { pattern: /スーパーレア|super.?rare|\bsuper\b/gi,                                        code: 'SR' },
-  { pattern: /ノーマルパラレル|normal.?parallel|N-Parallel/gi,                              code: 'NP' },
+  { pattern: /ノーマルパラレル(?:レア)?|normal.?parallel(?:.?rare)?|N-Parallel/gi,                              code: 'P' },
   { pattern: /ノーマルレア|normal.?rare/gi,                                                 code: 'NR' },
 ];
 
@@ -66,7 +87,9 @@ function normalizeRarity(rawRarity: string): string[] {
 
   // Step1: 複合レアリティをスキャン・除去（スペース区切りでも検出できる）
   for (const { pattern, code } of COMPOUND_RARITY_PATTERNS) {
-    if (pattern.test(remaining)) {
+    // g フラグ付きの正規表現の test() は lastIndex を覚えていて、次の呼び出しで途中から探してしまう。
+    // そのため同じレアリティの行が続くと見落として「N」になることがあった。i フラグだけの新しい正規表現で判定する。
+    if (new RegExp(pattern.source, 'i').test(remaining)) {
       if (!results.includes(code)) results.push(code);
       remaining = remaining.replace(new RegExp(pattern.source, 'gi'), ' ');
     }
