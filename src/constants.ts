@@ -8,7 +8,19 @@ export const INITIAL_NEWS: News[] = [
   { id: 1, startDate: new Date().toISOString().split('T')[0], content: "システムが本番稼働を開始しました。", type: 'success' },
 ];
 
-export const INITIAL_RARITIES = ["UR", "SR", "R", "N", "SE", "PS", "UL", "QCSE", "20th", "HR"];
+// レアリティの初期値（39種類。2026-11-08 整理）
+// 基本は公式カードデータベース（遊戯王ニューロン）の略号。空白は詰める（例: 公式「20th SE」→「20thSE」）。
+// 公式にないデザイン違いは「基本の略号-区別」で表す（例: UR-初期・UR-ロゴ・UR-OF＝オーバーフレーム）。
+// NR（ノーマルレア）は公式では R 扱いだが、見た目が違うため別に持つ。トークンは N として登録する。
+// 経緯と対応表: docs/design/レアリティ整理変更_2026-11-08.sql
+export const INITIAL_RARITIES = [
+  "N", "NR", "R", "SR", "UR", "SE",
+  "P", "P+UR", "P+SR", "P+SE", "P+HR",
+  "UL", "HR", "CR", "GR", "GSE", "PG", "EXSE", "PSE", "QCSE", "QCSE-GREEN", "20thSE", "10000SE", "GMR",
+  "KC+UR", "M", "M+SR", "M+UR", "M+SE",
+  "UR-RED", "UR-BLUE", "SE-RED", "SE-BLUE",
+  "UR-初期", "SE-初期", "UR-ロゴ", "SE-ロゴ", "UR-OF", "PSE-OF",
+];
 
 export const INITIAL_SEASONS: Season[] = [
   { id: 's13', name: '第13期 (2025~)', startDate: '2025-04-01' },
