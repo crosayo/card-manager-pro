@@ -16,6 +16,8 @@
 --             「6.」が変更で is_admin() に切り替わるポリシーの一覧。「7.」は切り替わる DB 関数。
 --   - 変更後: 「3.」「4.」が OK、「5.」が 1 以上、「6.」「7.」が 0 であること。
 --   - 「8.」「9.」は参考（この変更では触らない。8. は Storage の画像のポリシー、9. は誰でも読める SELECT ポリシー）。
+--   - 「10.」は authenticated も含むが anon か public にも向けた SELECT ポリシー（閲覧用。条件に auth.role() を使うものは除く）。
+--     変更SQLは置き換えない（2026-11-14 レビュー）。
 
 with users as (
   select u.id, u.email, coalesce(u.is_anonymous, false) as is_anonymous, u.created_at, u.last_sign_in_at
@@ -43,6 +45,19 @@ target_policies as (
       or (coalesce(p.qual, '') || ' ' || coalesce(p.with_check, '')) like '%auth.role()%'
       or (p.cmd <> 'SELECT' and ('public' = any(p.roles) or 'anon' = any(p.roles)))
     )
+    and not (p.cmd = 'SELECT' and ('anon' = any(p.roles) or 'public' = any(p.roles)) and coalesce(p.qual, '') not like '%auth.role()%')
+),
+kept_select as (
+  -- 置き換えの対象から外す SELECT ポリシー（anon か public を含む。閲覧用。変更SQLは触らない）
+  select p.tablename, p.policyname, p.roles, p.qual
+  from pg_policies p
+  where p.schemaname = 'public'
+    and p.tablename <> 'admins'
+    and p.cmd = 'SELECT'
+    and ('anon' = any(p.roles) or 'public' = any(p.roles))
+    and (coalesce(p.qual, '') || ' ' || coalesce(p.with_check, '')) !~ '(can_view|is_admin)\('
+    and 'authenticated' = any(p.roles)
+    and coalesce(p.qual, '') not like '%auth.role()%'
 ),
 role_functions as (
   -- 関数の中で auth.role() により「ログインしているか」だけを見ている public の関数
@@ -117,4 +132,9 @@ union all
 select '9. 条件なしで読める SELECT ポリシー',
        (select count(*) from open_select),
        coalesce((select string_agg(format('%s「%s」', tablename, policyname), ' / ' order by tablename, policyname) from open_select), 'なし'),
-       case when (select count(*) from open_select) = 0 then 'OK' else '要確認（招待制の外で読める）' end;
+       case when (select count(*) from open_select) = 0 then 'OK' else '要確認（招待制の外で読める）' end
+union all
+select '10. 置き換えの対象から外す SELECT ポリシー（anon・public 向け）',
+       (select count(*) from kept_select),
+       coalesce((select string_agg(format('%s「%s」%s 条件: %s', tablename, policyname, roles::text, coalesce(qual, '-')), ' / ' order by tablename, policyname) from kept_select), 'なし'),
+       '参考（authenticated も含むが閲覧用なので変更SQL・戻しSQLとも触らない。条件が true なら「9.」にも出る）';

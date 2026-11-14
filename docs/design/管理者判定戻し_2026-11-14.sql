@@ -8,6 +8,7 @@
 --
 -- やること（全体が1つの DO ブロック。途中で失敗すれば何も変わらない）:
 --   1. maintenance.admin_policy_backup に保存した元の条件で、ポリシーを元に戻す（いま is_admin() を使っているものだけ）。戻したら記録を消す。
+--      変更SQLは anon か public を含む SELECT ポリシーを置き換えない（記録にも入らない）ので、戻しもそれらには触らない。
 --   2. can_view()・reset_all_data()・increment_stock() を変更前の定義（auth.role() = 'authenticated'）に戻す。
 --   - public.admins 表と public.is_admin() は残す（どこからも使われなくなるだけで害はない。アプリの新しい版と
 --     「カード変更関数」が is_admin() を呼ぶため、消すとそれらが動かなくなる）。再変更のときは登録済みの管理者がそのまま使われる。

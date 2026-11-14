@@ -14,6 +14,9 @@
 --   3. ロックアウト防止: 登録後に admins が0人なら中止する。
 --   4. public スキーマのポリシーのうち、authenticated 向け・auth.role() を使うもの・誰でも書き込めるものの条件を
 --      (select public.is_admin()) に置き換える（ポリシー名・対象ロール・操作は変えない。招待制の閲覧ポリシー can_view() は対象外）。
+--      ただし anon か public を含む SELECT ポリシー（{anon,authenticated} 向けの using (true) など）は閲覧用なので置き換えない
+--      （置き換えると招待リンクの閲覧者が読めなくなる。2026-11-14 レビュー。確認SQLの「10.」に一覧が出る）。
+--      条件に auth.role() を使うもの（public 向けでも実際は「ログインしていれば読める」）は従来どおり置き換える。
 --      元の条件は maintenance.admin_policy_backup に保存し、戻しSQLが使う。
 --   5. can_view()・reset_all_data()・increment_stock() の「ログインしているか」の判定を is_admin() に置き換える。
 --   6. 置き換え漏れがあれば中止する。
@@ -104,6 +107,8 @@ begin
         or (coalesce(p.qual, '') || ' ' || coalesce(p.with_check, '')) like '%auth.role()%'
         or (p.cmd <> 'SELECT' and ('public' = any(p.roles) or 'anon' = any(p.roles)))
       )
+      -- 招待リンクの閲覧者（anon）や全員（public）にも向けた SELECT ポリシーは閲覧用なので置き換えない（確認SQLの「10.」。2026-11-14 レビュー）
+      and not (p.cmd = 'SELECT' and ('anon' = any(p.roles) or 'public' = any(p.roles)) and coalesce(p.qual, '') not like '%auth.role()%')
     order by p.tablename, p.policyname
   loop
     insert into maintenance.admin_policy_backup (tablename, policyname, cmd, roles, qual, with_check)
@@ -197,7 +202,9 @@ begin
       'authenticated' = any(p.roles)
       or (coalesce(p.qual, '') || ' ' || coalesce(p.with_check, '')) like '%auth.role()%'
       or (p.cmd <> 'SELECT' and ('public' = any(p.roles) or 'anon' = any(p.roles)))
-    );
+    )
+      -- 招待リンクの閲覧者（anon）や全員（public）にも向けた SELECT ポリシーは閲覧用なので置き換えない（確認SQLの「10.」）
+      and not (p.cmd = 'SELECT' and ('anon' = any(p.roles) or 'public' = any(p.roles)) and coalesce(p.qual, '') not like '%auth.role()%');
   if v_left > 0 then
     raise exception '中止: is_admin() に置き換えられなかったポリシーが % 件あります（何も変更していません）', v_left;
   end if;
