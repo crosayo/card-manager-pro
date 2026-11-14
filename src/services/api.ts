@@ -443,6 +443,19 @@ export const api = {
     return mapDbItemToAppItem(data);
   },
 
+  // Wiki 取込: 型番の頭（セットコード。英数字だけ）が同じ既存行の収録パック名（行ごと。src/lib/packMatch.ts で数える）
+  fetchCategoriesBySetCode: async (setCode: string): Promise<string[]> => {
+    ensureConnection();
+    if (!/^[A-Z0-9]+$/.test(setCode)) return [];
+    const { data, error } = await supabase
+      .from('items')
+      .select('category')
+      .ilike('card_id', `${setCode}-JP%`)
+      .limit(2000);
+    if (error) handleSupabaseError(error, 'fetchCategoriesBySetCode');
+    return (data || []).map((r: { category: string | null }) => r.category ?? '');
+  },
+
   // --- Items (Smart Pagination) ---
   // 検索・絞り込み・ソート・ページネーションはすべてDB関数 search_items で行う。
   // 検索ワードは空白区切りのAND検索で、表記ゆれ（全角/半角・ひらがな/カタカナ・

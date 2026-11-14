@@ -8,6 +8,7 @@ import { api } from '../services/api';
 import { useAppContext } from '../context/AppContext';
 import { normalizeCardName, normalizeForStorage, getErrorMessage } from '../utils';
 import { PageContainer, PageHeader } from '@/components/layout/Page';
+import { dominantSetCode, rankPackCandidates, PackCandidate } from '@/lib/packMatch';
 
 interface ScraperViewProps {
   isLoading: boolean;
@@ -21,6 +22,14 @@ interface ScrapedItem extends Omit<Item, 'id' | 'updatedAt'> {
 
 // 競合解決用の型
 type ResolutionType = 'merge' | 'overwrite' | 'skip';
+// パック名が一致しなかったときに、型番の頭（セットコード）で選んだ既存パックの候補
+interface PackSuggestion {
+  scrapedName: string;        // Wiki の見出し
+  setCode: string;
+  productId: string;          // 初期選択にした既存パック
+  candidates: PackCandidate[]; // 行数の多い順（先頭が初期選択）
+}
+
 interface ConflictItem {
   tempId: string;
   newItem: ScrapedItem;
@@ -50,6 +59,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
   // パック情報の管理
   const [productMode, setProductMode] = useState<'existing' | 'new'>('existing');
   const [selectedProductId, setSelectedProductId] = useState("");
+  const [packSuggestion, setPackSuggestion] = useState<PackSuggestion | null>(null);
   const [newProductData, setNewProductData] = useState({
     name: '', 
     releaseDate: new Date().toISOString().split('T')[0]
@@ -102,6 +112,21 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
     }));
   };
 
+  // 名前が一致しないとき、型番の頭（セットコード）が同じ既存行のパックを探す。見つからない・失敗したら null（従来どおり新規パック）
+  const findPackBySetCode = async (items: ScrapedItem[], scrapedName: string): Promise<PackSuggestion | null> => {
+    const setCode = dominantSetCode(items.map(i => i.cardId));
+    if (!setCode) return null;
+    try {
+      const categories = await api.fetchCategoriesBySetCode(setCode);
+      const candidates = rankPackCandidates(categories, products.map(p => p.name));
+      const top = candidates.length > 0 ? products.find(p => p.name === candidates[0].name) : undefined;
+      return top ? { scrapedName, setCode, productId: top.id, candidates } : null;
+    } catch (e) {
+      console.error('セットコードでのパック検索に失敗しました', e);
+      return null;
+    }
+  };
+
   const analyzeUrl = async () => {
     if (!url) {
       addToast('error', 'URL未入力', 'WikiのURLを入力するか、プリセットから選択してください。');
@@ -112,6 +137,7 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
     setScrapedItems([]);
     setSelectedIds(new Set());
     setImportStatus('idle');
+    setPackSuggestion(null);
 
     try {
       const itemsWithIds = await fetchAndParseUrl(url);
@@ -127,9 +153,19 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
           setSelectedProductId(match.id);
           addToast('success', '解析完了', `${itemsWithIds.length}件取得。既存のパック「${match.name}」と一致しました。`);
         } else {
-          setProductMode('new');
+          // 「新しいパックを作成」に切り替えたときのため、パック名には Wiki の見出しを入れておく
           setNewProductData(prev => ({ ...prev, name: scrapedCategory }));
-          addToast('success', '解析完了', `${itemsWithIds.length}件取得。新規パックとして登録準備ができました。`);
+          const suggestion = await findPackBySetCode(itemsWithIds, scrapedCategory);
+          if (suggestion) {
+            // 自動では確定しない: 候補を初期選択にし、画面の注意書きで管理者に確かめてもらう
+            setProductMode('existing');
+            setSelectedProductId(suggestion.productId);
+            setPackSuggestion(suggestion);
+            addToast('info', '解析完了', `${itemsWithIds.length}件取得。パック名が一致しないため、型番 ${suggestion.setCode} が同じ既存パック「${suggestion.candidates[0].name}」を選びました。登録先を確かめてください。`);
+          } else {
+            setProductMode('new');
+            addToast('success', '解析完了', `${itemsWithIds.length}件取得。新規パックとして登録準備ができました。`);
+          }
         }
       } else {
         addToast('success', '解析完了', `${itemsWithIds.length}件のカード情報が見つかりました。`);
@@ -493,6 +529,22 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
                         className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
                       />
                     </div>
+                  </div>
+                )}
+                {packSuggestion && productMode === 'existing' && selectedProductId === packSuggestion.productId && (
+                  <div className="mt-3 text-xs bg-amber-900/40 border border-amber-500/60 text-amber-100 rounded p-3 space-y-1">
+                    <p className="flex items-start gap-1.5">
+                      <TriangleAlert size={14} className="shrink-0 mt-0.5 text-amber-400" />
+                      <span>
+                        Wiki の見出し「{packSuggestion.scrapedName}」と同じ名前のパックがないため、型番の頭「{packSuggestion.setCode}」が同じ既存パック「{packSuggestion.candidates[0].name}」（{packSuggestion.candidates[0].count}行）を選んでいます。
+                        同じパックならこのまま、別のパックなら上で選び直すか「新しいパックを作成」に切り替えてください（パック名には Wiki の見出しが入っています）。
+                      </span>
+                    </p>
+                    {packSuggestion.candidates.length > 1 && (
+                      <p className="pl-5 text-amber-200/80">
+                        ほかの候補: {packSuggestion.candidates.slice(1, 4).map(c => `${c.name}（${c.count}行）`).join('、')}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
