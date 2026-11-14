@@ -218,10 +218,12 @@ create trigger on_items_updated
   for each row execute procedure public.handle_updated_at();
 
 -- 6. RPC関数 (ダッシュボード統計)
+-- security definer のため search_path を固定する（Q-2026-11-06-6）
 create or replace function public.get_dashboard_stats()
 returns json
 language plpgsql
 security definer
+set search_path = public, pg_temp
 as $$
 declare
   total_cards integer;
@@ -261,10 +263,12 @@ revoke execute on function public.reset_all_data() from public, anon;
 grant execute on function public.reset_all_data() to authenticated;
 
 -- 8. RPC関数 (レアリティ集計)
+-- security definer のため search_path を固定する（Q-2026-11-06-6）
 create or replace function public.get_distinct_rarities()
 returns table (rarity text)
 language plpgsql
 security definer
+set search_path = public, pg_temp
 as $$
 begin
   if not public.can_view() then

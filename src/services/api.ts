@@ -1422,7 +1422,8 @@ export const api = {
       await fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: lines.join('\n') }),
+        // 申請者の名前・メモに @everyone などが入っていても通知（メンション）にならないようにする（Q-2026-11-06-6）
+        body: JSON.stringify({ content: lines.join('\n'), allowed_mentions: { parse: [] } }),
       });
     } catch (e) {
       console.warn('Discord通知の送信に失敗しました:', e);
