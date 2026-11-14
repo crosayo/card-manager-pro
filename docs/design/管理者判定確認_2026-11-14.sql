@@ -18,6 +18,8 @@
 --   - 「8.」「9.」は参考（この変更では触らない。8. は Storage の画像のポリシー、9. は誰でも読める SELECT ポリシー）。
 --   - 「10.」は authenticated も含むが anon か public にも向けた SELECT ポリシー（閲覧用。条件に auth.role() を使うものは除く）。
 --     変更SQLは置き換えない（2026-11-14 レビュー）。
+--   - 「11.」は変更SQL・戻しSQLが決め打ちの定義で置き換える3つの関数。本文が変更前（schema.sql の 3cb6967 の版）か変更後（今の schema.sql）の
+--     どちらかと一致すれば OK。「想定と違う」なら本番で書き換えられているので、変更・戻しを実行せずに報告する。
 
 with users as (
   select u.id, u.email, coalesce(u.is_anonymous, false) as is_anonymous, u.created_at, u.last_sign_in_at
@@ -46,6 +48,24 @@ target_policies as (
       or (p.cmd <> 'SELECT' and ('public' = any(p.roles) or 'anon' = any(p.roles)))
     )
     and not (p.cmd = 'SELECT' and ('anon' = any(p.roles) or 'public' = any(p.roles)) and coalesce(p.qual, '') not like '%auth.role()%')
+),
+fixed_functions as (
+  -- 変更SQL・戻しSQLが決め打ちの定義で置き換える関数。本文（コメント・空白の違いを除く）の md5 を、
+  -- 変更前（2026-11-14 時点の設定画面 SQL＝コミット 3cb6967 の schema.sql）・変更後（今の schema.sql）の定義と比べる
+  select p.proname,
+         md5(btrim(regexp_replace(regexp_replace(p.prosrc, '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))) as h,
+         coalesce(array_to_string(p.proconfig, ','), '') as cfg
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public' and p.proname in ('can_view', 'reset_all_data', 'increment_stock')
+),
+fixed_judged as (
+  select f.proname, f.cfg,
+         case
+           when (f.proname, f.h) in (('can_view', '53e7bfc96c70940978db14fd8e6d2712'), ('reset_all_data', 'f3f4a2505d70d366e306f149087aaf2c'), ('increment_stock', 'f22608b5b0d978830297353ddcd2f1f3')) then '変更前の定義'
+           when (f.proname, f.h) in (('can_view', 'c8fb8d651e4dff4e1e2a273caa3d1747'), ('reset_all_data', '49e8b127cb260fcda51c8730d1100a2b'), ('increment_stock', '9d58ae856e8a8550bebf80e5c7687a63')) then '変更後の定義'
+           else '想定と違う'
+         end as state
+  from fixed_functions f
 ),
 kept_select as (
   -- 置き換えの対象から外す SELECT ポリシー（anon か public を含む。閲覧用。変更SQLは触らない）
@@ -137,4 +157,11 @@ union all
 select '10. 置き換えの対象から外す SELECT ポリシー（anon・public 向け）',
        (select count(*) from kept_select),
        coalesce((select string_agg(format('%s「%s」%s 条件: %s', tablename, policyname, roles::text, coalesce(qual, '-')), ' / ' order by tablename, policyname) from kept_select), 'なし'),
-       '参考（authenticated も含むが閲覧用なので変更SQL・戻しSQLとも触らない。条件が true なら「9.」にも出る）';
+       '参考（authenticated も含むが閲覧用なので変更SQL・戻しSQLとも触らない。条件が true なら「9.」にも出る）'
+union all
+select '11. 変更・戻しで決め打ちの定義に置き換える関数（can_view・reset_all_data・increment_stock）',
+       (select count(*) from fixed_judged where state = '想定と違う'),
+       coalesce((select string_agg(format('%s: %s（設定 %s）', proname, state, cfg), ' / ' order by proname) from fixed_judged), 'なし'),
+       case when (select count(*) from fixed_judged) < 3 then '要確認（関数が足りない）'
+            when (select count(*) from fixed_judged where state = '想定と違う') = 0 then 'OK'
+            else '要確認（本番で定義が書き換えられている。変更・戻しを実行すると上書きされるので、実行せずに報告する）' end;
