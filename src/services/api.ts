@@ -5,7 +5,7 @@ import { Item, Product, PaginatedItems, SortConfig, Season, News, SystemInfo, St
 import { INITIAL_RARITIES, INITIAL_SEASONS, INITIAL_SYSTEM_INFO } from '../constants';
 import { normalizeForStorage, toSearchKey, toSearchTokens, getErrorMessage } from '../utils';
 
-type ItemFilters = { category?: string | null, search?: string, showZeroStock?: boolean, rarities?: string[], rarityOrder?: string[] };
+export type ItemFilters = { category?: string | null, search?: string, showZeroStock?: boolean, rarities?: string[], rarityOrder?: string[] };
 
 // DBの行（snake_case）。supabase-js に DB の型定義を渡していないため、取得結果にはここで型を付ける
 type DbItem = { id: number; name: string; card_id: string; rarity: string; stock: number; category: string; updated_at: string | null };
@@ -460,6 +460,23 @@ export const api = {
       data:  ((rpcResult as SearchItemsResult)?.data  || []).map(mapDbItemToAppItem),
       count: (rpcResult  as SearchItemsResult)?.count || 0,
     };
+  },
+
+  // 検索条件に一致する全件を、画面と同じ並び順で取得する（CSV出力用。C1）
+  // search_items を pageSize 件ずつ呼び、count に届くまで繰り返す。
+  // search_items は最後に id で並べるため、ページをまたいでも重複・抜けは出ない（出力中にデータが変わった場合を除く）
+  fetchAllMatchingItems: async (
+    filters?: ItemFilters,
+    sort?: SortConfig,
+    pageSize: number = 500
+  ): Promise<Item[]> => {
+    const all: Item[] = [];
+    for (let page = 1; ; page++) {
+      const { data, count } = await api.fetchItems(page, pageSize, filters, sort);
+      all.push(...data);
+      if (data.length < pageSize || all.length >= count) break;
+    }
+    return all;
   },
 
   // 内部用: 全件取得ヘルパー

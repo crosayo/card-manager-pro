@@ -1,11 +1,11 @@
 
 'use client';
 
-import React, { useState, useEffect, useRef, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { InventoryList } from '@/views/InventoryList';
 import { useAppContext } from '@/context/AppContext';
-import { api } from '@/services/api';
+import { api, ItemFilters } from '@/services/api';
 import { Item, SortConfig } from '@/types';
 import { LoaderCircle } from 'lucide-react';
 import { getErrorCode, getErrorMessage } from '@/utils';
@@ -48,22 +48,26 @@ function InventoryPageContent() {
     if (selectedCategory) setSelectedRarities([]);
   }, [selectedCategory, setSelectedRarities]);
 
+  // 在庫一覧の検索条件（一覧の取得と CSV の全件出力で同じものを使う）
+  const itemFilters = useMemo<ItemFilters>(() => ({
+    category: selectedCategory,
+    search: searchKeyword,
+    showZeroStock: !showOnlyInStock,
+    rarities: selectedRarities.length > 0 ? selectedRarities : undefined,
+    rarityOrder: rarities.length > 0 ? rarities : undefined,
+  }), [selectedCategory, searchKeyword, showOnlyInStock, selectedRarities, rarities]);
+
+  // CSV出力用: 検索条件に一致する全件を、一覧と同じ並び順で取得する
+  const fetchAllFilteredItems = useCallback(
+    () => api.fetchAllMatchingItems(itemFilters, sortConfig),
+    [itemFilters, sortConfig]
+  );
+
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true);
       try {
-        const result = await api.fetchItems(
-          currentPage,
-          pageSize,
-          {
-            category: selectedCategory,
-            search: searchKeyword,
-            showZeroStock: !showOnlyInStock,
-            rarities: selectedRarities.length > 0 ? selectedRarities : undefined,
-            rarityOrder: rarities.length > 0 ? rarities : undefined,
-          },
-          sortConfig
-        );
+        const result = await api.fetchItems(currentPage, pageSize, itemFilters, sortConfig);
         setItems(result.data);
         setTotalCount(result.count);
         // 仮減らし在庫の取得（失敗しても無視）
@@ -84,7 +88,7 @@ function InventoryPageContent() {
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [addToast, setIsLoading, currentPage, pageSize, selectedCategory, searchKeyword, sortConfig, showOnlyInStock, selectedRarities, rarities]);
+  }, [addToast, setIsLoading, currentPage, pageSize, itemFilters, sortConfig]);
 
   const applySortConfig = (next: SortConfig) => {
     setSortConfig(next);
@@ -213,6 +217,7 @@ function InventoryPageContent() {
       onUpdateItem={handleUpdateItem}
       onDeleteItem={handleDeleteItem}
       pendingQuantities={pendingQuantities}
+      fetchAllFilteredItems={fetchAllFilteredItems}
     />
   );
 }

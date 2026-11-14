@@ -39,6 +39,7 @@ interface InventoryListProps {
   onUpdateItem: (id: number, item: Partial<Item>) => Promise<void>;
   onDeleteItem: (id: number) => Promise<void>;
   pendingQuantities?: Record<number, number>;
+  fetchAllFilteredItems: () => Promise<Item[]>;  // CSV出力用: 検索条件に一致する全件（一覧と同じ並び順）
 }
 
 export const InventoryList: React.FC<InventoryListProps> = ({
@@ -63,6 +64,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
   onUpdateItem,
   onDeleteItem,
   pendingQuantities = {},
+  fetchAllFilteredItems,
 }) => {
   const { rarities, selectedRarities, setSelectedRarities, showOnlyInStock, setShowOnlyInStock } = useAppContext();
   const router = useRouter();
@@ -85,6 +87,8 @@ export const InventoryList: React.FC<InventoryListProps> = ({
   // CSV Import State
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isImporting, setIsImporting] = useState(false);
+  // CSV Export State（全件取得中は連打で二重に出さない）
+  const [isExporting, setIsExporting] = useState(false);
 
   // Confirm Dialog State
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -142,14 +146,18 @@ export const InventoryList: React.FC<InventoryListProps> = ({
     });
   };
 
-  const handleExportCSV = () => {
-    addToast('info', 'CSV出力', '現在表示中のページデータを出力します。');
+  // 検索条件に一致する全件を出力する（表示中のページだけではない）。列は CSV 取り込みと同じ
+  const handleExportCSV = async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    addToast('info', 'CSV出力', `検索条件に一致する ${totalCount.toLocaleString()} 件を出力します。`);
     try {
+      const exportItems = await fetchAllFilteredItems();
       const BOM = '\uFEFF';
       const headers = ['ID', 'カード名', '型番', 'レアリティ', '在庫数', '収録パック', '発売日', '最終更新日'];
       // 文字列は引用符で囲む。= + - @ などで始まる値は Excel が数式として扱うため、先頭に ' を付けて文字列にする
       const text = (v: string) => `"${(/^[=+\-@\t\r]/.test(v) ? `'${v}` : v).replace(/"/g, '""')}"`;
-      const rows = items.map(item => [
+      const rows = exportItems.map(item => [
         item.id,
         text(item.name),
         text(item.cardId),
@@ -162,12 +170,18 @@ export const InventoryList: React.FC<InventoryListProps> = ({
       const csvContent = BOM + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
-      const fileName = `inventory_page${currentPage}_${new Date().toISOString().split('T')[0]}.csv`;
+      const fileName = `inventory_all_${new Date().toISOString().split('T')[0]}.csv`;
       link.href = URL.createObjectURL(blob);
       link.download = fileName;
       link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+      if (exportItems.length !== totalCount) {
+        addToast('info', 'CSV出力', `出力件数は ${exportItems.length.toLocaleString()} 件でした（出力中にデータが変わった可能性があります）。`);
+      }
     } catch (e) {
       addToast('error', 'CSV出力失敗', getErrorMessage(e));
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -391,10 +405,11 @@ export const InventoryList: React.FC<InventoryListProps> = ({
 
                  <button 
                    onClick={handleExportCSV}
-                   className="flex items-center gap-2 bg-slate-200 hover:bg-slate-300 text-slate-600 px-3 py-2 rounded-lg font-medium transition-colors shadow-sm text-sm whitespace-nowrap active:scale-95 duration-150"
-                   title="表示中のデータをCSVでダウンロード"
+                   disabled={isExporting}
+                   className="flex items-center gap-2 bg-slate-200 hover:bg-slate-300 text-slate-600 px-3 py-2 rounded-lg font-medium transition-colors shadow-sm text-sm whitespace-nowrap active:scale-95 duration-150 disabled:opacity-50"
+                   title="検索条件に一致する全件をCSVでダウンロード"
                  >
-                   <FileText size={18} />
+                   {isExporting ? <LoaderCircle size={18} className="animate-spin" /> : <FileText size={18} />}
                  </button>
                </>
              )}
