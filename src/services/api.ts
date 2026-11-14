@@ -449,7 +449,8 @@ export const api = {
       .from('items')
       .select('category')
       .ilike('card_id', `${setCode}-JP%`)
-      .limit(2000);
+      // PostgREST の1回の上限（Supabase の既定 max rows）は 1000 行。1パックの行数はこれより少なく、候補を選ぶには足りる
+      .limit(1000);
     if (error) handleSupabaseError(error, 'fetchCategoriesBySetCode');
     return (data || []).map((r: { category: string | null }) => r.category ?? '');
   },
