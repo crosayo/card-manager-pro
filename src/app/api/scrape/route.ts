@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getErrorMessage } from '@/utils';
+import { CARD_ID_RE } from '@/lib/cardId';
 
 // ── HTML ユーティリティ ──────────────────────────────────────────
 function decodeEntities(str: string): string {
@@ -25,10 +26,6 @@ function extractAnchorText(cellHtml: string): string {
   // アンカー内のHTMLタグ（<span>等）を除去してテキストのみ取得
   return decodeEntities(m[1].replace(/<[^>]+>/g, '').trim());
 }
-
-// 「26LP-JP001」のように数字始まりの型番もあるため、英字を1文字以上含む英数字を許容する
-// 「IMPH-JPS01」（＋1パック）「IMPH-JPT01」（トークン）のようにJPの後に英字が入る型番も拾う
-const CARD_ID_RE = /\b((?=[0-9]*[A-Z])[A-Z0-9]+-JP(?:\d{3,4}|[A-Z]\d{2,3}))\b/;
 
 interface RawEntry {
   cardId: string;
