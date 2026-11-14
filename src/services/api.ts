@@ -214,9 +214,9 @@ const ensureConnection = () => {
 
 export const api = {
   // --- Auth ---
-  onAuthStateChange: (callback: (session: Session | null) => void) => {
+  onAuthStateChange: (callback: (session: Session | null, event: string) => void) => {
     if (isSupabaseEnabled && supabase) {
-      return supabase.auth.onAuthStateChange((_event, session) => callback(session));
+      return supabase.auth.onAuthStateChange((event, session) => callback(session, event));
     }
     return { data: { subscription: { unsubscribe: () => {} } } };
   },
@@ -234,13 +234,11 @@ export const api = {
 
   // ログイン中のユーザーが管理者（DB の admins 表に登録済み）かを DB関数 is_admin で確かめる。
   // 失敗したとき（関数が未登録・通信エラーなど）は管理者として扱わない（Q-2026-11-06-1）
+  // 管理者か（DB の is_admin()）。通信エラー・DB エラーは例外にする（「管理者でない」と区別するため。呼び出し側で扱う）
   checkIsAdmin: async (): Promise<boolean> => {
     if (!isSupabaseEnabled || !supabase) return false;
     const { data, error } = await supabase.rpc('is_admin');
-    if (error) {
-      console.error('Supabase Error [checkIsAdmin]:', error);
-      return false;
-    }
+    if (error) handleSupabaseError(error, 'checkIsAdmin');
     return data === true;
   },
 

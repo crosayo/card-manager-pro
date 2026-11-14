@@ -8,6 +8,7 @@ import { ToastType, AppError, News, Product, Season, SystemInfo, InviteStatus } 
 import { api } from '@/services/api';
 import { getInviteCode } from '@/lib/invite';
 import { InStockChoice, resolveShowOnlyInStock } from '@/lib/inStockFilter';
+import { AdminCheckResult, nextIsAdmin } from '@/lib/adminCheck';
 import { INITIAL_RARITIES, INITIAL_SEASONS, INITIAL_SYSTEM_INFO } from '@/constants';
 import { getErrorMessage } from '@/utils';
 
@@ -73,6 +74,8 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   // 管理者かどうかの確認の連番（ログイン状態が続けて変わったとき、古い確認結果で上書きしない）
   const adminCheckSeq = useRef(0);
+  // 直前のログインユーザー（同じユーザーのままの出来事かを見分ける）
+  const lastUserIdRef = useRef<string | null>(null);
 
   // トーストID: Date.now() だと同一ミリ秒に複数出したとき重複するため連番を付与する
   const toastSeqRef = useRef(0);
@@ -247,9 +250,11 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   useEffect(() => {
-    const { data: authListener } = api.onAuthStateChange((session) => {
+    const { data: authListener } = api.onAuthStateChange((session, event) => {
       const sessionUser = session?.user ?? null;
       setUser(sessionUser);
+      const sameUser = sessionUser !== null && sessionUser.id === lastUserIdRef.current;
+      lastUserIdRef.current = sessionUser?.id ?? null;
       const seq = ++adminCheckSeq.current;
       if (!sessionUser) {
         setIsAdmin(false);
@@ -258,13 +263,17 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       }
       // 管理者かは「ログインしているか」ではなく DB の admins 表で判定する（is_admin。Q-2026-11-06-1）。
       // supabase-js のコールバックの中で別の通信を待つと処理が詰まることがあるため、次のタスクで確かめる。
-      // 確認に失敗したら管理者として扱わない
+      // 確認に失敗したら管理者として扱わない。ただしトークンの自動更新など同じユーザーのままなら直前の値を保つ（src/lib/adminCheck.ts）
       setTimeout(() => {
         api.checkIsAdmin()
-          .catch(() => false)
-          .then(ok => {
+          .then((isAdminNow): AdminCheckResult => ({ ok: true, isAdmin: isAdminNow }))
+          .catch((e): AdminCheckResult => {
+            console.error('管理者かどうかの確認に失敗しました', e);
+            return { ok: false };
+          })
+          .then(result => {
             if (seq !== adminCheckSeq.current) return;
-            setIsAdmin(ok);
+            setIsAdmin(prev => nextIsAdmin(event, sameUser, prev, result));
             setIsAuthReady(true);
           });
       }, 0);

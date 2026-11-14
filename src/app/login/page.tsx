@@ -20,8 +20,16 @@ export default function LoginPage() {
 
     try {
       await api.signInWithEmail(email, password);
-      // 管理者（DB の admins 表に登録済み）でなければ、ログインしたままにしない（Q-2026-11-06-1）
-      if (!(await api.checkIsAdmin())) {
+      // 管理者（DB の admins 表に登録済み）でなければ、ログインしたままにしない（Q-2026-11-06-1）。
+      // 確認自体が通信エラーなどで失敗したときは「未登録」と決めつけてサインアウトせず、エラーを出す（もう一度ログインを押せば確かめ直す）
+      let registered: boolean;
+      try {
+        registered = await api.checkIsAdmin();
+      } catch (checkErr) {
+        setError(`管理者かどうかを確かめられませんでした（通信エラーの可能性があります）。少し待ってからもう一度ログインしてください。（${getErrorMessage(checkErr)}）`);
+        return;
+      }
+      if (!registered) {
         await api.signOut();
         setError('このアカウントは管理者として登録されていません。管理者の登録は Supabase の SQL エディタで行います（運用手順書 6.2）。');
         return;
