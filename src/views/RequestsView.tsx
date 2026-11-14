@@ -97,7 +97,7 @@ export const RequestsView: React.FC = () => {
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await api.fetchRequests(undefined, { includeToken: isAdmin });
+      const data = await api.fetchRequests(undefined, { asAdmin: isAdmin });
       setRequests(data);
       // 一覧を読んだ時点の件数にバッジをそろえる（新着が届いていた場合も反映）
       if (isAdmin) refreshPendingRequestsCount();
@@ -293,7 +293,7 @@ export const RequestsView: React.FC = () => {
             { itemId: newItem.id, delta: -ri.quantity, label: newLabel },
           ], '完了済みリクエストの編集');
         }
-        updated = await api.fetchRequestById(req.id, { includeToken: true });
+        updated = await api.fetchRequestById(req.id, { asAdmin: true });
       } else {
         updated = await api.swapRequestItemByToken(ownedTokens[req.id], ri.id, newItem.id);
       }
@@ -373,7 +373,7 @@ export const RequestsView: React.FC = () => {
           : [{ itemId: ri.item.id, delta: ri.quantity - quantity, label: oldLabel }];
         stockFailures = await applyStockAdjustments(req.id, adjustments, '完了済みリクエストの編集');
       }
-      const updated = await api.fetchRequestById(req.id, { includeToken: true });
+      const updated = await api.fetchRequestById(req.id, { asAdmin: true });
       setRequests(prev => prev.map(r => r.id === req.id ? updated : r));
       setEditQuantities(prev => ({ ...prev, [ri.id]: quantity }));
       setLogsCache(prev => { const next = { ...prev }; delete next[req.id]; return next; });

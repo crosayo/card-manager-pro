@@ -36,7 +36,7 @@ type DbRequestItem = {
 };
 type DbRequest = {
   id: number; token?: string; requester_name: string; message: string | null; status: CardRequest['status'];
-  price_total: number | null; admin_memo: string | null; created_at: string; resolved_at: string | null;
+  price_total: number | null; admin_memo?: string | null; created_at: string; resolved_at: string | null;
   request_items?: DbRequestItem[] | null;
 };
 type DbRequestEditLog = {
@@ -127,7 +127,7 @@ const mapDbRequestToAppRequest = (db: DbRequest): CardRequest => ({
   message: db.message,
   status: db.status,
   priceTotal: db.price_total,
-  adminMemo: db.admin_memo,
+  adminMemo: db.admin_memo ?? null,
   createdAt: db.created_at,
   resolvedAt: db.resolved_at,
   items: db.request_items ? db.request_items.map(mapDbRequestItemToAppRequestItem) : undefined,
@@ -153,10 +153,12 @@ const mapDbInviteAccessLog = (db: DbInviteAccessLog): InviteAccessLog => ({
   userAgent: db.user_agent,
 });
 
-// requests テーブルの取得列（token は管理者のみ取得する。anon には列単位で閲覧権限がない）
-const REQUEST_PUBLIC_COLUMNS = 'id, requester_name, message, status, price_total, admin_memo, created_at, resolved_at';
-const requestSelect = (includeToken?: boolean) =>
-  `${REQUEST_PUBLIC_COLUMNS}${includeToken ? ', token' : ''}, request_items(*, items(*), supplies(*))`;
+// requests テーブルの取得列。token（編集用リンク）と admin_memo（管理者メモ）は管理者のときだけ取得する
+// （anon には列単位で閲覧権限がない。admin_memo は Q-2026-11-06-2 で anon の権限から外す）
+const REQUEST_PUBLIC_COLUMNS = 'id, requester_name, message, status, price_total, created_at, resolved_at';
+const REQUEST_ADMIN_COLUMNS = 'token, admin_memo';
+const requestSelect = (asAdmin?: boolean) =>
+  `${REQUEST_PUBLIC_COLUMNS}${asAdmin ? `, ${REQUEST_ADMIN_COLUMNS}` : ''}, request_items(*, items(*), supplies(*))`;
 
 const mapDbNewsToAppNews =(dbNews: DbNews): News => ({
   id: dbNews.id,
@@ -1022,15 +1024,15 @@ export const api = {
   },
 
   // --- Requests ---
-  // 編集用トークンは未ログインユーザーには返さない（DB側でも列単位で閲覧を禁止している）
+  // 編集用トークン・管理者メモは管理者（asAdmin）のときだけ取得する（DB側でも anon は列単位で閲覧できない）
   fetchRequests: async (
     status?: 'pending' | 'completed' | 'cancelled',
-    options?: { includeToken?: boolean }
+    options?: { asAdmin?: boolean }
   ): Promise<CardRequest[]> => {
     ensureConnection();
     let query = supabase
       .from('requests')
-      .select<string, DbRequest>(requestSelect(options?.includeToken))
+      .select<string, DbRequest>(requestSelect(options?.asAdmin))
       .order('created_at', { ascending: false });
     if (status) query = query.eq('status', status);
     const { data, error } = await query;
@@ -1041,11 +1043,11 @@ export const api = {
     return (data || []).map(mapDbRequestToAppRequest);
   },
 
-  fetchRequestById: async (id: number, options?: { includeToken?: boolean }): Promise<CardRequest> => {
+  fetchRequestById: async (id: number, options?: { asAdmin?: boolean }): Promise<CardRequest> => {
     ensureConnection();
     const { data, error } = await supabase
       .from('requests')
-      .select<string, DbRequest>(requestSelect(options?.includeToken))
+      .select<string, DbRequest>(requestSelect(options?.asAdmin))
       .eq('id', id)
       .single();
     if (error) handleSupabaseError(error, 'fetchRequestById');
@@ -1177,7 +1179,7 @@ export const api = {
       throwIfAnyFailed(results, 'updateRequestStatus(unitPrices)');
     }
 
-    return api.fetchRequestById(requestId, { includeToken: true });
+    return api.fetchRequestById(requestId, { asAdmin: true });
   },
 
   // 管理者による編集（ログイン済みのためDBのRLS/権限で保護される）
@@ -1224,7 +1226,7 @@ export const api = {
       if (error) handleSupabaseError(error, 'editRequest(addItems)');
     }
 
-    return api.fetchRequestById(requestId, { includeToken: true });
+    return api.fetchRequestById(requestId, { asAdmin: true });
   },
 
   addRequestEditLog: async (params: {

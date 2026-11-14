@@ -712,11 +712,12 @@ begin
 end;
 $$;
 
--- 13-5. 未ログイン(anon)はリクエストを直接書き換えられないようにし、トークン列も見えないようにする
--- （送信・編集は上記のDB関数経由のみ。管理者(authenticated)の権限は変更しない）
+-- 13-5. 未ログイン(anon)はリクエストを直接書き換えられないようにし、トークン列・管理者メモ列も見えないようにする
+-- （送信・編集は上記のDB関数経由のみ。管理者(authenticated)の権限は変更しない。admin_memo は Q-2026-11-06-2 で外した）
 revoke insert, update, delete on public.requests, public.request_items, public.request_edit_logs from anon;
 revoke select on public.requests from anon;
-grant select (id, requester_name, message, status, price_total, admin_memo, created_at, resolved_at)
+revoke select (admin_memo) on public.requests from anon;
+grant select (id, requester_name, message, status, price_total, created_at, resolved_at)
   on public.requests to anon;
 
 -- 14. 完了・キャンセル時に編集用リンクを無効化（トークンを新しい値に入れ替える）
