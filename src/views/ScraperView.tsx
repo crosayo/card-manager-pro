@@ -6,9 +6,10 @@ import { Download, Zap, RefreshCw, Check, LoaderCircle, Save, Trash, Copy, Plus,
 import { AppError, ToastType, Item } from '../types';
 import { api } from '../services/api';
 import { useAppContext } from '../context/AppContext';
-import { normalizeCardName, normalizeForStorage, getErrorMessage } from '../utils';
+import { normalizeForStorage, getErrorMessage, getErrorCode } from '../utils';
 import { PageContainer, PageHeader } from '@/components/layout/Page';
 import { dominantSetCode, rankPackCandidates, PackCandidate } from '@/lib/packMatch';
+import { findExistingForImport, isUniqueViolation } from '@/lib/importMatch';
 
 interface ScraperViewProps {
   isLoading: boolean;
@@ -217,16 +218,15 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
       
       const conflictList: ConflictItem[] = [];
       const safeList: ScrapedItem[] = [];
+      // 登録先パック名（新規パックは作る前なので入力した名前）
+      const targetCategory = productMode === 'new'
+        ? newProductData.name
+        : (products.find(p => p.id === selectedProductId)?.name ?? '');
 
       for (const newItem of scrapedItems) {
-        // カード名と型番が一致するものを探す（レアリティは一旦不問にするか、レアリティも含めるか。
-        // 要件：①同じカード名で型番が同じものがあるかチェック（レアリティ不問）
-        const match = allExistingItems.find(
-          existing => 
-            normalizeCardName(existing.name) === normalizeCardName(newItem.name) && 
-            normalizeCardName(existing.cardId) === normalizeCardName(newItem.cardId) &&
-            existing.rarity === newItem.rarity // レアリティも一致しないと「別のカード」として扱えない（例えばURとSEは別物）
-        );
+        // 型番がある行は DB の一意索引と同じ「型番×レアリティ×登録先パック」で照合し（名前の表記違いを見ない）、
+        // なければ従来の「名前×型番×レアリティ」で探す（src/lib/importMatch.ts）
+        const match = findExistingForImport(newItem, targetCategory, allExistingItems);
 
         if (match) {
           conflictList.push({
@@ -279,17 +279,24 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
       if (!categoryName) throw new Error("カテゴリの決定に失敗しました");
 
       let count = 0;
+      // 同じ型番×レアリティ×パックの行がすでにある（一意索引違反 23505）ものは止めずにスキップして数える
+      let skippedDuplicates = 0;
 
       // 1. 安全なアイテムの新規登録
       for (const item of safes) {
-        await api.addItem({
-            name: normalizeForStorage(item.name),
-            cardId: normalizeForStorage(item.cardId),
-            rarity: item.rarity,
-            stock: item.stock,
-            category: categoryName
-        });
-        count++;
+        try {
+          await api.addItem({
+              name: normalizeForStorage(item.name),
+              cardId: normalizeForStorage(item.cardId),
+              rarity: item.rarity,
+              stock: item.stock,
+              category: categoryName
+          });
+          count++;
+        } catch (e) {
+          if (!isUniqueViolation(getErrorCode(e))) throw e;
+          skippedDuplicates++;
+        }
       }
 
       // 2. 競合アイテムの処理
@@ -306,15 +313,22 @@ export const ScraperView: React.FC<ScraperViewProps> = ({ isLoading: globalIsLoa
           // 上書き (名前やカテゴリ情報の更新)
           // 注意: Wiki解析結果のstockは常に0のため、在庫数は更新対象に含めない
           // （含めると実在庫が0にリセットされてしまう）
-          await api.updateItem(conf.existingItem.id, {
-            name: normalizeForStorage(conf.newItem.name),
-            category: categoryName // カテゴリも選択中のパックに更新
-          });
-          count++;
+          try {
+            await api.updateItem(conf.existingItem.id, {
+              name: normalizeForStorage(conf.newItem.name),
+              category: categoryName // カテゴリも選択中のパックに更新
+            });
+            count++;
+          } catch (e) {
+            if (!isUniqueViolation(getErrorCode(e))) throw e;
+            skippedDuplicates++;
+          }
         }
       }
       
-      addToast('success', 'インポート完了', `${count}件のデータを処理しました。`);
+      addToast('success', 'インポート完了', skippedDuplicates > 0
+        ? `${count}件のデータを処理しました。同じ型番・レアリティ・パックの行がすでにあった${skippedDuplicates}件はスキップしました。`
+        : `${count}件のデータを処理しました。`);
       setImportStatus('done');
       setIsConflictModalOpen(false);
 
