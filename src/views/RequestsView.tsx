@@ -274,25 +274,9 @@ export const RequestsView: React.FC = () => {
   const doSwap = async (req: CardRequest, ri: RequestItem, newItem: Item) => {
     try {
       let updated: CardRequest;
-      let stockFailures: string[] = [];
       if (isAdmin) {
-        await api.swapRequestItem(ri.id, newItem.id);
-        const oldLabel = `${ri.item?.name ?? ''} ${ri.item?.cardId ?? ''} ${ri.item?.rarity ?? ''}`.trim();
-        const newLabel = `${newItem.name} ${newItem.cardId} ${newItem.rarity}`;
-        await api.addRequestEditLog({
-          requestId: req.id,
-          editorName: '管理者',
-          fieldChanged: 'カード変更',
-          oldValue: oldLabel,
-          newValue: newLabel,
-        }).catch(e => console.warn('ログ記録失敗:', e));
-        // 完了済みなら、元のカードの在庫を戻し、差し替え先の在庫を減らす
-        if (req.status === 'completed' && ri.itemId) {
-          stockFailures = await applyStockAdjustments(req.id, [
-            { itemId: ri.itemId, delta: ri.quantity, label: oldLabel },
-            { itemId: newItem.id, delta: -ri.quantity, label: newLabel },
-          ], '完了済みリクエストの編集');
-        }
+        // 差し替え・編集履歴・完了済みなら在庫の差分を、DB関数で1つのトランザクションとして行う（Q-2026-11-06-5）
+        await api.changeRequestItemAsAdmin(ri.id, newItem.id, ri.quantity);
         updated = await api.fetchRequestById(req.id, { asAdmin: true });
       } else {
         updated = await api.swapRequestItemByToken(ownedTokens[req.id], ri.id, newItem.id);
@@ -302,11 +286,7 @@ export const RequestsView: React.FC = () => {
       setExpandedLogs(prev => ({ ...prev, [req.id]: false }));
       setSwappingItemId(null);
       setSwapAlternatives([]);
-      if (stockFailures.length > 0) {
-        notifyStockFailures(stockFailures);
-      } else {
-        addToast('success', 'カード変更完了', `${newItem.rarity} / ${newItem.cardId} に変更しました。`);
-      }
+      addToast('success', 'カード変更完了', `${newItem.rarity} / ${newItem.cardId} に変更しました。`);
     } catch (e) {
       addToast('error', '変更失敗', getErrorMessage(e));
     }
@@ -344,7 +324,8 @@ export const RequestsView: React.FC = () => {
     }
   };
 
-  // 変更パネルの内容をすぐに保存する（カードの差し替え・枚数変更・編集履歴、完了済みなら在庫の差分も反映）
+  // 変更パネルの内容をすぐに保存する（カードの差し替え・枚数変更・編集履歴、完了済みなら在庫の差分と在庫ログ）。
+  // DB関数 change_request_item_as_admin が1つのトランザクションで行うため、失敗したときは何も変わらない（Q-2026-11-06-5）
   const applyChange = async (req: CardRequest, ri: RequestItem) => {
     const target = changeOptions.find(o => o.id === changeTargetId);
     if (!ri.item || !target) return;
@@ -353,37 +334,15 @@ export const RequestsView: React.FC = () => {
     if (!isSwap && quantity === ri.quantity) { closeChange(); return; }
     setIsUpdating(true);
     try {
-      const oldLabel = `${ri.item.name} ${ri.item.cardId} ${ri.item.rarity}`;
       const newLabel = `${target.name} ${target.cardId} ${target.rarity}`;
-      if (isSwap) {
-        await api.swapRequestItem(ri.id, target.id);
-        await api.addRequestEditLog({ requestId: req.id, editorName: '管理者', fieldChanged: 'カード変更', oldValue: oldLabel, newValue: newLabel })
-          .catch(e => console.warn('ログ記録失敗:', e));
-      }
-      if (quantity !== ri.quantity) {
-        await api.editRequestAsAdmin(req.id, { itemChanges: [{ requestItemId: ri.id, quantity }] });
-        await api.addRequestEditLog({ requestId: req.id, editorName: '管理者', fieldChanged: '数量', oldValue: `${ri.item.name}: ${ri.quantity}枚`, newValue: `${target.name}: ${quantity}枚` })
-          .catch(e => console.warn('ログ記録失敗:', e));
-      }
-      // 完了済みなら、元のカードの在庫を戻し、変更先の在庫を減らす（同じカードなら枚数の差分だけ）
-      let stockFailures: string[] = [];
-      if (req.status === 'completed') {
-        const adjustments: StockAdjustment[] = isSwap
-          ? [{ itemId: ri.item.id, delta: ri.quantity, label: oldLabel }, { itemId: target.id, delta: -quantity, label: newLabel }]
-          : [{ itemId: ri.item.id, delta: ri.quantity - quantity, label: oldLabel }];
-        stockFailures = await applyStockAdjustments(req.id, adjustments, '完了済みリクエストの編集');
-      }
+      await api.changeRequestItemAsAdmin(ri.id, target.id, quantity);
       const updated = await api.fetchRequestById(req.id, { asAdmin: true });
       setRequests(prev => prev.map(r => r.id === req.id ? updated : r));
       setEditQuantities(prev => ({ ...prev, [ri.id]: quantity }));
       setLogsCache(prev => { const next = { ...prev }; delete next[req.id]; return next; });
       setExpandedLogs(prev => ({ ...prev, [req.id]: false }));
       closeChange();
-      if (stockFailures.length > 0) {
-        notifyStockFailures(stockFailures);
-      } else {
-        addToast('success', '変更しました', `${newLabel} / ${quantity}枚`);
-      }
+      addToast('success', '変更しました', `${newLabel} / ${quantity}枚`);
     } catch (e) {
       addToast('error', '変更失敗', getErrorMessage(e));
     } finally {

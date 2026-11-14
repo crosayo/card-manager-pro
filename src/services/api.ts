@@ -1508,14 +1508,22 @@ export const api = {
     return (data || []).map(mapDbItemToAppItem);
   },
 
-  // リクエストアイテムのカードを別バリアントに差し替え（名前確認不要）
-  swapRequestItem: async (requestItemId: number, newItemId: number): Promise<void> => {
+  // 管理者によるカード変更（D8）: 同名カードの別型番・別レアリティへの差し替えと枚数変更、編集履歴、
+  // 完了済みなら在庫の差分と在庫ログを、DB関数 change_request_item_as_admin で1つのトランザクションとして行う
+  // （途中で失敗しても在庫と明細が食い違わない。Q-2026-11-06-5）
+  changeRequestItemAsAdmin: async (requestItemId: number, newItemId: number, quantity: number): Promise<void> => {
     ensureConnection();
-    const { error } = await supabase
-      .from('request_items')
-      .update({ item_id: newItemId })
-      .eq('id', requestItemId);
-    if (error) handleSupabaseError(error, 'swapRequestItem');
+    const { error } = await supabase.rpc('change_request_item_as_admin', {
+      p_request_item_id: requestItemId,
+      p_new_item_id: newItemId,
+      p_quantity: quantity,
+    });
+    if (error) {
+      if (isMissingFunction(error)) {
+        throw new Error('DB関数 change_request_item_as_admin が未登録です。改修ログ（2026-11-14 点検指摘の一括修正）の SQL を実行してください。');
+      }
+      handleSupabaseError(error, 'changeRequestItemAsAdmin');
+    }
   },
 
   fetchPendingRequestsCount: async (): Promise<number> => {
