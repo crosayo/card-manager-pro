@@ -342,6 +342,17 @@ alter table public.items add column if not exists search_key text
     public.normalize_search(category)
   ) stored;
 
+-- 10-2. 同じ行の二重登録を防ぐ一意索引と、検索用の索引（2026-11-14 一括登録準備。一括登録準備変更_2026-11-14.sql と同じ定義）
+-- 一意索引: 型番×レアリティ×収録パック（型番が空の行はカード名で区別）。同じ組の行を足すとエラーになる（意図した動き）。
+-- ※ 既存の DB に流すときは、先に重複を片付けること（重複が残っていると索引を作れず止まる。本番は一括登録準備変更 SQL で作成済み）
+create unique index if not exists items_card_rarity_category_key on public.items (
+  (coalesce(nullif(card_id, ''), '名前:' || name)), (coalesce(rarity, '')), (coalesce(category, ''))
+);
+-- 検索の索引: pg_trgm（Supabase では extensions スキーマに入れる）と search_key の GIN 索引。search_items の LIKE が使う
+create schema if not exists extensions;
+create extension if not exists pg_trgm with schema extensions;
+create index if not exists items_search_key_trgm on public.items using gin (search_key extensions.gin_trgm_ops);
+
 -- 11. RPC関数 (検索 + 絞り込み + ソート + サーバー側ページネーション)
 -- 検索ワードは空白区切りのAND検索。表記ゆれは search_key で吸収する
 -- ※ api.ts の呼び出しパラメータと一致させること
@@ -359,11 +370,14 @@ CREATE OR REPLACE FUNCTION public.search_items(
 RETURNS json
 LANGUAGE plpgsql
 STABLE
+-- 呼び出しごとに検索語に合わせた実行計画を作る（短い語で索引を全部読む計画を使い回さないため。2026-11-14 一括登録準備）
+SET plan_cache_mode = force_custom_plan
 AS $$
 DECLARE
   v_tokens text[];
   v_asc boolean := (p_direction = 'asc');
   v_result json;
+  v_like text;  -- pg_trgm の索引用（2026-11-14 一括登録準備）
 BEGIN
   v_tokens := ARRAY(
     SELECT k FROM (
@@ -372,6 +386,8 @@ BEGIN
     ) s
     WHERE k <> ''
   );
+  -- 3文字以上でいちばん長い検索語で先に絞る（索引を使う）。2文字以下だけなら絞らない（2026-11-14 一括登録準備）
+  v_like := coalesce((SELECT '%' || t || '%' FROM unnest(v_tokens) AS t WHERE length(t) >= 3 ORDER BY length(t) DESC LIMIT 1), '%');
 
   WITH filtered AS (
     SELECT i.id, i.name, i.card_id, i.rarity, i.stock, i.category, i.updated_at,
@@ -386,6 +402,7 @@ BEGIN
         SELECT 1 FROM unnest(v_tokens) AS tok
         WHERE strpos(i.search_key, tok) = 0
       )
+      AND i.search_key LIKE v_like  -- 上の条件の一部なので結果は変わらない
   ),
   ranked AS (
     SELECT f.*, row_number() OVER (ORDER BY
