@@ -325,7 +325,7 @@ export const SuppliesView: React.FC = () => {
                       </div>
                       {/* 管理者ホバーボタン */}
                       {isAdmin && (
-                        <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                        <div className="absolute top-2 left-2 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 has-[:focus-visible]:opacity-100 transition-opacity flex gap-1">
                           <button
                             onClick={() => openEditModal(supply)}
                             className="w-7 h-7 bg-white/90 hover:bg-white rounded-md flex items-center justify-center text-slate-600 shadow"

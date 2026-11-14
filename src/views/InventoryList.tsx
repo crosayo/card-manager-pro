@@ -693,7 +693,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                      {item.name}
                      <button 
                        onClick={(e) => openImageSearch(item.name, e)}
-                       className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-cyan-600 transition-opacity"
+                       className="[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100 text-slate-400 hover:text-cyan-600 transition-opacity"
                        title="Google画像検索を開く"
                      >
                        <ImageIcon size={16} />
@@ -771,7 +771,7 @@ export const InventoryList: React.FC<InventoryListProps> = ({
                       })()}
 
                       {isAdmin && (
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-1 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 has-[:focus-visible]:opacity-100 transition-opacity">
                           <button
                             type="button"
                             onClick={(e) => openDuplicateModal(item, e)}
