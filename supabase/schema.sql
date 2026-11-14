@@ -451,6 +451,7 @@ alter table public.requests add column if not exists token text default gen_rand
 
 -- 13-1. リクエスト送信（本体と明細を一括登録し、編集用トークンを返す）
 -- B7: 登録の前に在庫の上限を確かめる（カードは「在庫 − 受付中の枚数」まで、サプライは在庫数まで）
+-- Q-2026-11-06-3: 名前50文字・メモ1000文字・明細200件まで。明細はカードかサプライのどちらか一方だけ
 create or replace function public.create_request(p_requester_name text, p_message text, p_items jsonb)
 returns json
 language plpgsql
@@ -473,18 +474,33 @@ begin
   if coalesce(btrim(p_requester_name), '') = '' then
     raise exception 'お名前を入力してください' using errcode = '22023';
   end if;
+  if char_length(btrim(p_requester_name)) > 50 then
+    raise exception 'お名前は50文字以内で入力してください' using errcode = '22023';
+  end if;
+  if char_length(btrim(coalesce(p_message, ''))) > 1000 then
+    raise exception 'メモは1000文字以内で入力してください' using errcode = '22023';
+  end if;
   if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
     raise exception 'リクエストするカードがありません' using errcode = '22023';
+  end if;
+  if jsonb_array_length(p_items) > 200 then
+    raise exception '1回にリクエストできるのは200件までです' using errcode = '22023';
   end if;
 
   -- B7: 在庫の上限を確かめる（登録の前に、明細をカード・サプライごとに合計して判定する）
   for v_item in select * from jsonb_array_elements(p_items) loop
+    if jsonb_typeof(v_item) <> 'object' then
+      raise exception 'リクエストの内容が正しくありません' using errcode = '22023';
+    end if;
     v_qty := (v_item->>'quantity')::integer;
     if v_qty is null or v_qty < 1 then
       raise exception '枚数は1以上で指定してください' using errcode = '22023';
     end if;
     if v_item->>'item_id' is null and v_item->>'supply_id' is null then
       raise exception 'リクエスト対象が指定されていません' using errcode = '22023';
+    end if;
+    if v_item->>'item_id' is not null and v_item->>'supply_id' is not null then
+      raise exception 'カードとサプライは別の行で指定してください' using errcode = '22023';
     end if;
   end loop;
 
@@ -567,6 +583,7 @@ as $$
 $$;
 
 -- 13-3. 申請者による編集（メモ・枚数・カードの削除）。編集履歴もここで記録する
+-- Q-2026-11-06-3: メモ1000文字・枚数変更と削除はそれぞれ200件まで
 drop function if exists public.edit_request_by_token(text, text, jsonb);
 create or replace function public.edit_request_by_token(
   p_token text,
@@ -589,6 +606,15 @@ declare
 begin
   if not public.can_view() then
     raise exception '招待リンクが無効か、有効期限が切れています' using errcode = '42501';
+  end if;
+  if p_message is not null and char_length(btrim(p_message)) > 1000 then
+    raise exception 'メモは1000文字以内で入力してください' using errcode = '22023';
+  end if;
+  if p_item_changes is not null and (jsonb_typeof(p_item_changes) <> 'array' or jsonb_array_length(p_item_changes) > 200) then
+    raise exception '一度に変更できるのは200件までです' using errcode = '22023';
+  end if;
+  if coalesce(array_length(p_remove_item_ids, 1), 0) > 200 then
+    raise exception '一度に削除できるのは200件までです' using errcode = '22023';
   end if;
   select id, requester_name, message, status into v_req
   from public.requests where token::text = p_token

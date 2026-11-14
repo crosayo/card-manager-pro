@@ -9,7 +9,7 @@ import { CardRequest, Item, RequestItem, RequestEditLog } from '@/types';
 import { api } from '@/services/api';
 import { useAppContext } from '@/context/AppContext';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { RARITY_STYLES, RARITY_DEFAULT_STYLE } from '@/constants';
+import { RARITY_STYLES, RARITY_DEFAULT_STYLE, REQUEST_MESSAGE_MAX_LENGTH } from '@/constants';
 import { buildRequestEditUrl, getSavedRequestTokens, saveRequestToken } from '@/lib/requestTokens';
 import { getErrorMessage } from '@/utils';
 import { PageContainer, PageHeader } from '@/components/layout/Page';
@@ -839,6 +839,7 @@ export const RequestsView: React.FC = () => {
                       <label className="text-xs font-bold text-slate-600 mb-1 block">メモ</label>
                       <textarea
                         value={editMessage}
+                        maxLength={REQUEST_MESSAGE_MAX_LENGTH}
                         onChange={(e) => setEditMessage(e.target.value)}
                         className="w-full border border-slate-300 rounded px-3 py-1.5 text-sm h-16 resize-none focus:ring-2 focus:ring-cyan-500 outline-none"
                       />
