@@ -7,6 +7,7 @@ import type { User } from '@supabase/supabase-js';
 import { ToastType, AppError, News, Product, Season, SystemInfo, InviteStatus } from '@/types';
 import { api } from '@/services/api';
 import { getInviteCode } from '@/lib/invite';
+import { InStockChoice, resolveShowOnlyInStock } from '@/lib/inStockFilter';
 import { INITIAL_RARITIES, INITIAL_SEASONS, INITIAL_SYSTEM_INFO } from '@/constants';
 import { getErrorMessage } from '@/utils';
 
@@ -64,7 +65,11 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [seasons, setSeasons] = useState<Season[]>(INITIAL_SEASONS);
   const [systemInfo, setSystemInfo] = useState<SystemInfo>(INITIAL_SYSTEM_INFO);
   const [selectedRarities, setSelectedRarities] = useState<string[]>([]);
-  const [showOnlyInStock, setShowOnlyInStock] = useState(false);
+  // 在庫ありだけ表示: 管理者でなければ初期値 true、管理者なら false（企画書の決定。src/lib/inStockFilter.ts）。
+  // 切り替えた値は立場（管理者か）ごとに覚え、立場が変わったらその立場の初期値に戻る
+  const [inStockChoice, setInStockChoice] = useState<InStockChoice>(null);
+  const showOnlyInStock = resolveShowOnlyInStock(isAdmin, inStockChoice);
+  const setShowOnlyInStock = useCallback((val: boolean) => setInStockChoice({ forAdmin: isAdmin, value: val }), [isAdmin]);
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   // 管理者かどうかの確認の連番（ログイン状態が続けて変わったとき、古い確認結果で上書きしない）
   const adminCheckSeq = useRef(0);
