@@ -5,6 +5,16 @@ import { Item, Product, PaginatedItems, SortConfig, Season, News, SystemInfo, St
 import { INITIAL_RARITIES, INITIAL_SEASONS, INITIAL_SYSTEM_INFO } from '../constants';
 import { normalizeForStorage, toSearchKey, toSearchTokens, getErrorMessage } from '../utils';
 
+// 在庫ログの絞り込み条件。from / to は日本時間の日付（YYYY-MM-DD）
+export type StockLogFilters = { source?: StockLog['source']; from?: string; to?: string; cardName?: string };
+
+// YYYY-MM-DD の翌日を YYYY-MM-DD で返す（期間の終わりを「翌日0時より前」で表すため）
+const nextDate = (ymd: string): string => {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+};
+
 export type ItemFilters = { category?: string | null, search?: string, showZeroStock?: boolean, rarities?: string[], rarityOrder?: string[] };
 
 // DBの行（snake_case）。supabase-js に DB の型定義を渡していないため、取得結果にはここで型を付ける
@@ -966,18 +976,37 @@ export const api = {
     }
   },
 
-  fetchStockLogs: async (limit: number = 50): Promise<StockLog[]> => {
+  // 在庫ログを新しい順にページ単位で取得する（05 §0 C2）。
+  // 期間は日本時間の日付（YYYY-MM-DD、両端を含む）。カード名の絞り込みは在庫一覧の検索と同じく
+  // items.search_key（カード名・型番・収録パック）に対する空白区切りの AND 検索で、サプライのログは対象外になる。
+  fetchStockLogs: async (
+    page: number = 1,
+    pageSize: number = 50,
+    filters?: StockLogFilters
+  ): Promise<{ data: StockLog[]; count: number }> => {
     ensureConnection();
-    const { data, error } = await supabase
+    const tokens = toSearchTokens(filters?.cardName ?? '');
+    // カード名で絞るときは items を内部結合にして、結合先の列で絞り込めるようにする
+    const itemsEmbed = tokens.length > 0 ? 'items!inner(name, card_id, rarity)' : 'items(name, card_id, rarity)';
+    let query = supabase
       .from('stock_logs')
-      .select('*, items(name, card_id, rarity), supplies(name)')
+      .select(`*, ${itemsEmbed}, supplies(name)`, { count: 'exact' });
+
+    if (filters?.source) query = query.eq('source', filters.source);
+    if (filters?.from) query = query.gte('created_at', `${filters.from}T00:00:00+09:00`);
+    if (filters?.to) query = query.lt('created_at', `${nextDate(filters.to)}T00:00:00+09:00`);
+    // toSearchKey が記号（% _ \ など）を取り除くため、トークンはそのまま LIKE に使える
+    for (const t of tokens) query = query.like('items.search_key', `%${t}%`);
+
+    const { data, error, count } = await query
       .order('created_at', { ascending: false })
-      .limit(limit);
+      .order('id', { ascending: false })
+      .range((page - 1) * pageSize, page * pageSize - 1);
     if (error) {
-      if (error.code === '42P01') return [];
+      if (error.code === '42P01') return { data: [], count: 0 };
       handleSupabaseError(error, 'fetchStockLogs');
     }
-    return (data || []).map(mapDbStockLogToAppStockLog);
+    return { data: (data || []).map(mapDbStockLogToAppStockLog), count: count ?? 0 };
   },
 
   // --- Requests ---

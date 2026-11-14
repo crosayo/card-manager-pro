@@ -1,10 +1,10 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { ScrollText, LoaderCircle, ExternalLink, X, CalendarDays, Layers } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { ScrollText, LoaderCircle, ExternalLink, X, CalendarDays, Layers, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { StockLog } from '@/types';
-import { api } from '@/services/api';
+import { api, StockLogFilters } from '@/services/api';
 import { RARITY_STYLES, RARITY_DEFAULT_STYLE } from '@/constants';
 import Link from 'next/link';
 import { PageContainer, PageHeader } from '@/components/layout/Page';
@@ -38,6 +38,12 @@ const formatDateFull = (iso: string) => {
 
 type GroupBy = 'none' | 'date' | 'rarity';
 
+const PAGE_SIZE = 50;
+
+// 期間・カード名の入力欄。「絞り込む」を押したときだけ検索条件に反映する（入力のたびに問い合わせない）
+type DraftFilters = { from: string; to: string; cardName: string };
+const EMPTY_DRAFT: DraftFilters = { from: '', to: '', cardName: '' };
+
 export const LogsView: React.FC = () => {
   const [logs, setLogs] = useState<StockLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -45,32 +51,65 @@ export const LogsView: React.FC = () => {
   const [groupBy, setGroupBy] = useState<GroupBy>('date');
   const [selectedLog, setSelectedLog] = useState<StockLog | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [totalCount, setTotalCount] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<DraftFilters>(EMPTY_DRAFT);
+  const [applied, setApplied] = useState<DraftFilters>(EMPTY_DRAFT);
+  const [currentPage, setCurrentPage] = useState(1);
+  // 古い問い合わせの結果が後から届いても表示を上書きしないための番号
+  const requestSeq = useRef(0);
 
   useEffect(() => {
+    const seq = ++requestSeq.current;
     const load = async () => {
       setIsLoading(true);
+      setLoadError(null);
       try {
-        const data = await api.fetchStockLogs(200);
-        setLogs(data);
+        const filters: StockLogFilters = {
+          source: filterSource === 'all' ? undefined : filterSource,
+          from: applied.from || undefined,
+          to: applied.to || undefined,
+          cardName: applied.cardName.trim() || undefined,
+        };
+        const result = await api.fetchStockLogs(currentPage, PAGE_SIZE, filters);
+        if (seq !== requestSeq.current) return;
+        setLogs(result.data);
+        setTotalCount(result.count);
       } catch (e) {
+        if (seq !== requestSeq.current) return;
         console.error('ログ取得失敗:', e);
+        setLogs([]);
+        setTotalCount(0);
+        setLoadError('ログを取得できませんでした。時間をおいて再度お試しください。');
       } finally {
-        setIsLoading(false);
+        if (seq === requestSeq.current) setIsLoading(false);
       }
     };
     load();
-  }, []);
+  }, [filterSource, applied, currentPage]);
 
-  const filtered = useMemo(() =>
-    filterSource === 'all' ? logs : logs.filter(l => l.source === filterSource),
-    [logs, filterSource]
-  );
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const rangeStart = totalCount === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(currentPage * PAGE_SIZE, totalCount);
+  // 開始日が終了日より後なら絞り込めない（YYYY-MM-DD は文字列の大小で比べられる）
+  const isRangeInvalid = draft.from !== '' && draft.to !== '' && draft.from > draft.to;
+  const hasAnyFilter = filterSource !== 'all' || applied.from !== '' || applied.to !== '' || applied.cardName.trim() !== ''
+    || draft.from !== '' || draft.to !== '' || draft.cardName !== '';
+
+  const changeSource = (s: StockLog['source'] | 'all') => { setFilterSource(s); setCurrentPage(1); };
+  const applyDraft = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isRangeInvalid) return;
+    setApplied({ ...draft });
+    setCurrentPage(1);
+  };
+  const clearFilters = () => { setDraft(EMPTY_DRAFT); setApplied(EMPTY_DRAFT); setFilterSource('all'); setCurrentPage(1); };
 
   const grouped = useMemo(() => {
-    if (groupBy === 'none') return [{ key: 'all', label: '', logs: filtered }];
+    if (groupBy === 'none') return [{ key: 'all', label: '', logs }];
 
     const map = new Map<string, StockLog[]>();
-    for (const log of filtered) {
+    for (const log of logs) {
       const key = groupBy === 'date'
         ? formatDateKey(log.createdAt)
         : (log.itemRarity || (log.supplyId ? 'サプライ' : 'その他'));
@@ -78,7 +117,7 @@ export const LogsView: React.FC = () => {
       map.get(key)!.push(log);
     }
     return Array.from(map.entries()).map(([key, logs]) => ({ key, label: key, logs }));
-  }, [filtered, groupBy]);
+  }, [logs, groupBy]);
 
   const toggleGroup = (key: string) => {
     setCollapsedGroups(prev => {
@@ -113,7 +152,7 @@ export const LogsView: React.FC = () => {
           {(['all', 'manual', 'request', 'csv'] as const).map(s => (
             <button
               key={s}
-              onClick={() => setFilterSource(s)}
+              onClick={() => changeSource(s)}
               className={`px-3 py-1.5 rounded-lg text-sm font-bold border transition-colors ${
                 filterSource === s
                   ? 'bg-cyan-600 text-white border-cyan-600'
@@ -159,11 +198,96 @@ export const LogsView: React.FC = () => {
         </div>
       </div>
 
+      {/* 期間・カード名の絞り込み（「絞り込む」で反映） */}
+      <form onSubmit={applyDraft} className="bg-white rounded-xl border border-slate-200 p-3 mb-4 flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+          開始日
+          <input
+            type="date"
+            value={draft.from}
+            max={draft.to || undefined}
+            onChange={(e) => setDraft(prev => ({ ...prev, from: e.target.value }))}
+            className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-slate-700 focus:ring-2 focus:ring-cyan-500 outline-none"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+          終了日
+          <input
+            type="date"
+            value={draft.to}
+            min={draft.from || undefined}
+            onChange={(e) => setDraft(prev => ({ ...prev, to: e.target.value }))}
+            className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-slate-700 focus:ring-2 focus:ring-cyan-500 outline-none"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-slate-500 flex-1 min-w-[180px]">
+          カード名・型番
+          <input
+            type="text"
+            value={draft.cardName}
+            onChange={(e) => setDraft(prev => ({ ...prev, cardName: e.target.value }))}
+            placeholder="例: ブルーアイズ / LOB-JP001"
+            className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-slate-700 focus:ring-2 focus:ring-cyan-500 outline-none"
+          />
+        </label>
+        <div className="flex gap-2">
+          <button
+            type="submit"
+            disabled={isRangeInvalid}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-bold bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-40"
+          >
+            <Search size={14} /> 絞り込む
+          </button>
+          <button
+            type="button"
+            onClick={clearFilters}
+            disabled={!hasAnyFilter}
+            className="px-3 py-1.5 rounded-lg text-sm border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+          >
+            条件をクリア
+          </button>
+        </div>
+        <p className="w-full text-xs text-slate-400">
+          期間は日本時間で、開始日・終了日の両方を含みます。カード名はカード名・型番・収録パック名に当たり、在庫一覧の検索と同じく表記ゆれを吸収します（カード名で絞るとサプライのログは出ません）。
+          {isRangeInvalid && <span className="text-rose-500 font-bold ml-1">開始日が終了日より後になっています。</span>}
+        </p>
+      </form>
+
+      {/* 件数とページ送り */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3 text-sm text-slate-500">
+        <span>
+          {totalCount === 0 ? '0件' : `全${totalCount.toLocaleString()}件中 ${rangeStart.toLocaleString()}〜${rangeEnd.toLocaleString()}件`}
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            disabled={currentPage <= 1 || isLoading}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+          >
+            <ChevronLeft size={14} /> 前へ
+          </button>
+          <span className="font-bold text-slate-700">{currentPage} <span className="font-normal text-slate-400">/ {totalPages}</span></span>
+          <button
+            type="button"
+            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            disabled={currentPage >= totalPages || isLoading}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+          >
+            次へ <ChevronRight size={14} />
+          </button>
+        </div>
+      </div>
+
       {isLoading ? (
         <div className="flex items-center justify-center py-20">
           <LoaderCircle className="animate-spin text-cyan-600" size={32} />
         </div>
-      ) : filtered.length === 0 ? (
+      ) : loadError ? (
+        <div className="bg-white rounded-xl p-12 text-center text-rose-500 border border-rose-200">
+          {loadError}
+        </div>
+      ) : logs.length === 0 ? (
         <div className="bg-white rounded-xl p-12 text-center text-slate-400 border border-slate-200">
           ログがありません
         </div>
