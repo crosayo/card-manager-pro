@@ -9,6 +9,7 @@ import { api } from '@/services/api';
 import { Item, SortConfig } from '@/types';
 import { LoaderCircle } from 'lucide-react';
 import { getErrorCode, getErrorMessage } from '@/utils';
+import { DEFAULT_INVENTORY_SORT, getSavedInventorySort, saveInventorySort } from '@/lib/sortPreference';
 
 function InventoryPageContent() {
   const { isAdmin, handleLoginToggle, news, isLoading, addToast, setIsLoading, products, rarities, selectedRarities, setSelectedRarities, showOnlyInStock } = useAppContext();
@@ -22,7 +23,15 @@ function InventoryPageContent() {
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 50;
   
-  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'releaseDate', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState<SortConfig>(DEFAULT_INVENTORY_SORT);
+
+  // 保存した並び順を復元する。localStorage はサーバー描画時に読めないため、ハイドレーション後に読む。
+  // データ取得は 300ms 待ってから行い、待つ間に並び順が変われば取り消すため、復元しても二重取得にはならない
+  useEffect(() => {
+    const saved = getSavedInventorySort();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage はサーバー描画時に読めないため、ハイドレーション後に読む
+    setSortConfig(current => (current.key === saved.key && current.direction === saved.direction ? current : saved));
+  }, []);
 
   const categoryParam = searchParams.get('category');
   const selectedCategory = categoryParam ? decodeURIComponent(categoryParam) : null;
@@ -77,17 +86,21 @@ function InventoryPageContent() {
     return () => clearTimeout(timer);
   }, [addToast, setIsLoading, currentPage, pageSize, selectedCategory, searchKeyword, sortConfig, showOnlyInStock, selectedRarities, rarities]);
 
-  const handleSort = (key: keyof Item | 'releaseDate') => {
-    setSortConfig(current => ({
-      key,
-      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
-    }));
+  const applySortConfig = (next: SortConfig) => {
+    setSortConfig(next);
+    saveInventorySort(next);
     setCurrentPage(1);
   };
 
+  const handleSort = (key: keyof Item | 'releaseDate') => {
+    applySortConfig({
+      key,
+      direction: sortConfig.key === key && sortConfig.direction === 'asc' ? 'desc' : 'asc'
+    });
+  };
+
   const setSortDirectly = (key: keyof Item | 'releaseDate', direction: 'asc' | 'desc') => {
-    setSortConfig({ key, direction });
-    setCurrentPage(1);
+    applySortConfig({ key, direction });
   };
 
   const updateStock = async (id: number, delta: number) => {
