@@ -8,6 +8,7 @@ import { CardRequest } from '@/types';
 import { useAppContext } from '@/context/AppContext';
 import { PageContainer, PageHeader } from '@/components/layout/Page';
 import { getErrorMessage } from '@/utils';
+import { getSavedPickingChecks, savePickingChecks, PickingChecks } from '@/lib/pickingChecks';
 
 // 1行 = 取り出すカード（またはサプライ）1種類。受付中の全リクエストの枚数を合計する
 interface PickingRow {
@@ -21,6 +22,7 @@ interface PickingRow {
   stock: number | null;  // 削除済みなど不明なら null
   total: number;
   breakdown: { requestId: number; requester: string; quantity: number }[];
+  signature: string;  // 内訳（リクエストIDと枚数）。保存したチェックが今の内容と同じか確かめるのに使う
 }
 
 const buildRows = (requests: CardRequest[], releaseDates: Map<string, string>): PickingRow[] => {
@@ -39,14 +41,14 @@ const buildRows = (requests: CardRequest[], releaseDates: Map<string, string>): 
               name: ri.item?.name ?? '不明なカード（削除済み）',
               rarity: ri.item?.rarity ?? '',
               stock: ri.item?.stock ?? null,
-              total: 0, breakdown: [],
+              total: 0, breakdown: [], signature: '',
             }
           : {
               key, kind: 'supply',
               pack: 'サプライ', releaseDate: '', cardId: '', rarity: '',
               name: ri.supply?.name ?? '不明なサプライ（削除済み）',
               stock: ri.supply?.stock ?? null,
-              total: 0, breakdown: [],
+              total: 0, breakdown: [], signature: '',
             };
         rows.set(key, row);
       }
@@ -54,14 +56,21 @@ const buildRows = (requests: CardRequest[], releaseDates: Map<string, string>): 
       row.breakdown.push({ requestId: req.id, requester: req.requesterName, quantity: ri.quantity });
     }
   }
-  return Array.from(rows.values());
+  return Array.from(rows.values()).map(row => ({
+    ...row,
+    signature: row.breakdown
+      .map(b => `${b.requestId}x${b.quantity}`)
+      .sort()
+      .join(','),
+  }));
 };
 
 export const PickingListView: React.FC = () => {
   const { addToast, products, rarities } = useAppContext();
   const [requests, setRequests] = useState<CardRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  // 行のキー → チェックした時点の内訳。内訳が今と違う行はチェックなしとして扱う
+  const [checked, setChecked] = useState<PickingChecks>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -71,6 +80,9 @@ export const PickingListView: React.FC = () => {
       .finally(() => { if (!cancelled) setIsLoading(false); });
     return () => { cancelled = true; };
   }, [addToast]);
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage はサーバー描画時に読めないため、ハイドレーション後に読む
+  useEffect(() => { setChecked(getSavedPickingChecks()); }, []);
 
   const rows = useMemo(() => {
     const releaseDates = new Map(products.map(p => [p.name, p.releaseDate]));
@@ -88,7 +100,22 @@ export const PickingListView: React.FC = () => {
 
   const totalQuantity = rows.reduce((sum, r) => sum + r.total, 0);
   const shortageCount = rows.filter(r => r.stock !== null && r.stock < r.total).length;
-  const checkedCount = rows.filter(r => checked[r.key]).length;
+  const isRowChecked = (row: PickingRow) => checked[row.key] === row.signature;
+  const checkedCount = rows.filter(isRowChecked).length;
+
+  // 保存するのは今のリストにあって内訳が一致するチェックだけ（古いチェックはこのとき捨てる）
+  const updateChecks = (next: PickingChecks) => {
+    setChecked(next);
+    savePickingChecks(next);
+  };
+  const toggleCheck = (row: PickingRow) => {
+    const next: PickingChecks = {};
+    for (const r of rows) {
+      const on = r.key === row.key ? !isRowChecked(r) : isRowChecked(r);
+      if (on) next[r.key] = r.signature;
+    }
+    updateChecks(next);
+  };
 
   return (
     <PageContainer>
@@ -129,7 +156,19 @@ export const PickingListView: React.FC = () => {
               在庫が足りないものが {shortageCount} 種類あります。
             </div>
           )}
-          <p className="print:hidden mb-2 text-xs text-slate-500">取り出したらチェックを付けてください（チェックは保存されません）。{checkedCount}/{rows.length} 種類</p>
+          <div className="print:hidden mb-2 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-slate-500">
+              取り出したらチェックを付けてください（チェックはこのブラウザに保存され、閉じても続きから再開できます。リクエストの内容が変わった行はチェックが外れます）。{checkedCount}/{rows.length} 種類
+            </p>
+            <button
+              type="button"
+              onClick={() => updateChecks({})}
+              disabled={checkedCount === 0}
+              className="px-3 py-1 text-xs text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg disabled:opacity-40"
+            >
+              チェックをすべて外す
+            </button>
+          </div>
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto print:shadow-none print:border-0">
             <table className="w-full text-left text-sm">
               <thead className="bg-slate-50 text-slate-500 text-xs font-bold border-b border-slate-200">
@@ -147,14 +186,14 @@ export const PickingListView: React.FC = () => {
               <tbody className="divide-y divide-slate-100">
                 {rows.map(row => {
                   const isShort = row.stock !== null && row.stock < row.total;
-                  const isChecked = !!checked[row.key];
+                  const isChecked = isRowChecked(row);
                   return (
                     <tr key={row.key} className={`break-inside-avoid ${isChecked ? 'bg-slate-50 text-slate-400' : ''}`}>
                       <td className="p-3">
                         <input
                           type="checkbox"
                           checked={isChecked}
-                          onChange={() => setChecked(prev => ({ ...prev, [row.key]: !prev[row.key] }))}
+                          onChange={() => toggleCheck(row)}
                           className="w-4 h-4 accent-cyan-600"
                           aria-label={`${row.name} を取り出した`}
                         />
