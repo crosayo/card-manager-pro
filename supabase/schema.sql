@@ -97,6 +97,7 @@ $$;
 
 -- 招待コードの確認（有効なら最終アクセス・回数・アクセス履歴を記録し、自動延長する）
 -- 自動延長: auto_extend_days が設定されていれば、有効期限を「今から auto_extend_days 日後」まで延ばす
+-- ただし自動延長で延びるのは作成から180日まで（Q-2026-11-06-7）。それより先は管理者が手動で延長する
 create or replace function public.redeem_invite(p_code text)
 returns json
 language plpgsql
@@ -112,7 +113,7 @@ begin
       use_count = use_count + 1,
       expires_at = case
         when auto_extend_days is not null
-          then greatest(expires_at, now() + make_interval(days => auto_extend_days))
+          then greatest(expires_at, least(now() + make_interval(days => auto_extend_days), created_at + interval '180 days'))
         else expires_at
       end
   where code = p_code and revoked_at is null and expires_at > now()

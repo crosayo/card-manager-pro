@@ -2,7 +2,6 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ShoppingBag, ClipboardList, LoaderCircle, ChevronDown, ChevronRight, Check, X, PenLine, Trash, RefreshCw, Link2, Info, Undo2, TriangleAlert } from 'lucide-react';
 import { CardRequest, Item, RequestItem, RequestEditLog } from '@/types';
@@ -11,6 +10,7 @@ import { useAppContext } from '@/context/AppContext';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { RARITY_STYLES, RARITY_DEFAULT_STYLE, REQUEST_MESSAGE_MAX_LENGTH } from '@/constants';
 import { buildRequestEditUrl, getSavedRequestTokens, saveRequestToken } from '@/lib/requestTokens';
+import { takeSecretParam } from '@/lib/urlSecret';
 import { getErrorMessage } from '@/utils';
 import { PageContainer, PageHeader } from '@/components/layout/Page';
 
@@ -49,8 +49,6 @@ const getRarityStyle = (rarity: string): string => {
 
 export const RequestsView: React.FC = () => {
   const { isAdmin, addToast, rarities, refreshPendingRequestsCount } = useAppContext();
-  const router = useRouter();
-  const searchParams = useSearchParams();
   const [requests, setRequests] = useState<CardRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<CardRequest['status'] | 'all'>('all');
@@ -114,8 +112,20 @@ export const RequestsView: React.FC = () => {
   // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage はサーバー描画時に読めないため、ハイドレーション後に読む
   useEffect(() => { setOwnedTokens(getSavedRequestTokens()); }, []);
 
-  // 編集用リンク（/requests?token=...）から開かれた場合: トークンを照合してこのブラウザに保存する
-  const tokenParam = searchParams.get('token');
+  // 編集用リンク（/requests#token=...。以前の /requests?token=... も読む）から開かれた場合:
+  // トークンをすぐに URL から消し（アドレスバー・履歴に残さない）、照合してこのブラウザに保存する（Q-2026-11-06-7）
+  const [tokenParam, setTokenParam] = useState<string | null>(null);
+  useEffect(() => {
+    const take = () => {
+      const { value, cleanedUrl } = takeSecretParam(window.location.href, 'token');
+      if (cleanedUrl !== null) window.history.replaceState(window.history.state, '', cleanedUrl);
+      if (value) setTokenParam(value);
+    };
+    take();
+    // 同じページで別の編集用リンク（#token=...）を開いたとき
+    window.addEventListener('hashchange', take);
+    return () => window.removeEventListener('hashchange', take);
+  }, []);
   useEffect(() => {
     if (!tokenParam) return;
     let cancelled = false;
@@ -135,12 +145,11 @@ export const RequestsView: React.FC = () => {
       } catch (e) {
         if (!cancelled) addToast('error', '編集用リンクの確認に失敗しました', getErrorMessage(e));
       } finally {
-        // トークンをアドレスバーや履歴に残さない
-        if (!cancelled) router.replace('/requests');
+        if (!cancelled) setTokenParam(null);
       }
     })();
     return () => { cancelled = true; };
-  }, [tokenParam, addToast, router]);
+  }, [tokenParam, addToast]);
 
   // 編集用リンクから開いたリクエストまでスクロール
   useEffect(() => {
