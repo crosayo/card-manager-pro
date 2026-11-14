@@ -20,6 +20,12 @@ export default function LoginPage() {
 
     try {
       await api.signInWithEmail(email, password);
+      // 管理者（DB の admins 表に登録済み）でなければ、ログインしたままにしない（Q-2026-11-06-1）
+      if (!(await api.checkIsAdmin())) {
+        await api.signOut();
+        setError('このアカウントは管理者として登録されていません。管理者の登録は Supabase の SQL エディタで行います（運用手順書 6.2）。');
+        return;
+      }
       // ログイン成功したらトップページへ
       router.push('/');
     } catch (err) {

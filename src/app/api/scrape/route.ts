@@ -215,7 +215,8 @@ async function fetchAllowed(url: string): Promise<Response | null> {
   return null;
 }
 
-// Authorization: Bearer <アクセストークン> を Supabase Auth で検証する。失敗時はエラー応答を返す
+// Authorization: Bearer <アクセストークン> を Supabase Auth で検証し、さらに DB関数 is_admin で
+// 管理者（admins 表に登録済み）かを確かめる（Q-2026-11-06-1）。失敗時はエラー応答を返す
 async function verifyAdmin(req: NextRequest): Promise<NextResponse | null> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -226,10 +227,22 @@ async function verifyAdmin(req: NextRequest): Promise<NextResponse | null> {
   if (!token) {
     return NextResponse.json({ error: 'ログインが必要です。' }, { status: 401 });
   }
-  const client = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
+  // is_admin を本人の権限で呼ぶため、アクセストークンを付けたクライアントを作る
+  const client = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
   const { data, error } = await client.auth.getUser(token);
   if (error || !data.user) {
     return NextResponse.json({ error: 'ログインの有効期限が切れています。再度ログインしてください。' }, { status: 401 });
+  }
+  const { data: isAdmin, error: adminError } = await client.rpc('is_admin');
+  if (adminError) {
+    console.error('Scrape API: is_admin の確認に失敗しました', adminError);
+    return NextResponse.json({ error: '管理者かどうかを確認できませんでした。時間をおいてもう一度お試しください。' }, { status: 503 });
+  }
+  if (isAdmin !== true) {
+    return NextResponse.json({ error: '管理者のみ利用できます。' }, { status: 403 });
   }
   return null;
 }
@@ -237,7 +250,7 @@ async function verifyAdmin(req: NextRequest): Promise<NextResponse | null> {
 // ── メインハンドラー ─────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
-    // 管理者（ログイン済み）のみ利用可能。第三者による踏み台利用を防ぐ
+    // 管理者（admins 表に登録済み）のみ利用可能。第三者による踏み台利用を防ぐ
     const authError = await verifyAdmin(req);
     if (authError) return authError;
 

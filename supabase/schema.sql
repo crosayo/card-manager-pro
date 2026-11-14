@@ -1,3 +1,27 @@
+-- 0-0. 管理者（Q-2026-11-06-1）
+-- 管理者は「ログインしているか」ではなく、admins 表に登録された Auth ユーザーかで判定する（is_admin()）。
+-- admins は API から読み書きできない（RLS 有効・ポリシーなし・権限なし）。追加・削除は SQL エディタで行う。
+-- ★ 新しい環境では、この SQL を実行したあと、最初の管理者を SQL エディタで登録すること（登録するまで誰も管理できない）:
+--   insert into public.admins (user_id) select id from auth.users where email = 'ここに管理者のメールアドレス';
+create table if not exists public.admins (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+alter table public.admins enable row level security;
+revoke all on public.admins from public, anon, authenticated;
+
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (select 1 from public.admins a where a.user_id = auth.uid());
+$$;
+revoke all on function public.is_admin() from public;
+grant execute on function public.is_admin() to anon, authenticated, service_role;
+
 -- 0. 招待リンク（招待制: 未ログインの閲覧者は有効な招待コードが必要）
 -- アプリは全リクエストに x-invite-code ヘッダーで招待コードを付けて送る
 create table if not exists public.invites (
@@ -14,7 +38,7 @@ create table if not exists public.invites (
 alter table public.invites add column if not exists auto_extend_days integer check (auto_extend_days > 0);
 alter table public.invites enable row level security;
 drop policy if exists "Allow authenticated all" on public.invites;
-create policy "Allow authenticated all" on public.invites for all to authenticated using (true) with check (true);
+create policy "Allow authenticated all" on public.invites for all to authenticated using ((select public.is_admin())) with check ((select public.is_admin()));
 revoke all on public.invites from anon;
 
 -- 招待リンクのアクセス履歴（redeem_invite が記録。90日で自動削除）
@@ -28,7 +52,7 @@ create table if not exists public.invite_access_logs (
 create index if not exists invite_access_logs_invite_idx on public.invite_access_logs(invite_id, accessed_at desc);
 alter table public.invite_access_logs enable row level security;
 drop policy if exists "Allow authenticated all" on public.invite_access_logs;
-create policy "Allow authenticated all" on public.invite_access_logs for all to authenticated using (true) with check (true);
+create policy "Allow authenticated all" on public.invite_access_logs for all to authenticated using ((select public.is_admin())) with check ((select public.is_admin()));
 revoke all on public.invite_access_logs from anon;
 
 -- リクエストヘッダーの招待コード（PostgREST が request.headers に設定する）
@@ -54,7 +78,7 @@ as $$
   from (select coalesce(current_setting('request.headers', true), '{}')::json as h) t;
 $$;
 
--- 閲覧できるか: 管理者（ログイン済み）または 有効期限内で取り消されていない招待コード
+-- 閲覧できるか: 管理者（is_admin）または 有効期限内で取り消されていない招待コード
 create or replace function public.can_view()
 returns boolean
 language sql
@@ -62,7 +86,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select coalesce(auth.role(), '') = 'authenticated'
+  select public.is_admin()
       or exists (
         select 1 from public.invites
         where code = public.request_invite_code()
@@ -150,34 +174,34 @@ alter table public.items enable row level security;
 alter table public.products enable row level security;
 alter table public.config enable row level security;
 
--- ポリシーの設定
+-- ポリシーの設定（書き込みは管理者のみ。Q-2026-11-06-1 で「ログインしていれば可」から is_admin() に変更）
 drop policy if exists "Allow public read access" on public.news;
 create policy "Allow public read access" on public.news for select using (true);
 drop policy if exists "Allow authenticated all" on public.news;
-create policy "Allow authenticated all" on public.news for all using (auth.role() = 'authenticated');
+create policy "Allow authenticated all" on public.news for all using ((select public.is_admin()));
 
 drop policy if exists "Allow public read access" on public.items;
 create policy "Allow public read access" on public.items for select using (true);
 drop policy if exists "Allow authenticated insert" on public.items;
-create policy "Allow authenticated insert" on public.items for insert with check (auth.role() = 'authenticated');
+create policy "Allow authenticated insert" on public.items for insert with check ((select public.is_admin()));
 drop policy if exists "Allow authenticated update" on public.items;
-create policy "Allow authenticated update" on public.items for update using (auth.role() = 'authenticated');
+create policy "Allow authenticated update" on public.items for update using ((select public.is_admin()));
 drop policy if exists "Allow authenticated delete" on public.items;
-create policy "Allow authenticated delete" on public.items for delete using (auth.role() = 'authenticated');
+create policy "Allow authenticated delete" on public.items for delete using ((select public.is_admin()));
 
 drop policy if exists "Allow public read access" on public.products;
 create policy "Allow public read access" on public.products for select using (true);
 drop policy if exists "Allow authenticated insert" on public.products;
-create policy "Allow authenticated insert" on public.products for insert with check (auth.role() = 'authenticated');
+create policy "Allow authenticated insert" on public.products for insert with check ((select public.is_admin()));
 drop policy if exists "Allow authenticated update" on public.products;
-create policy "Allow authenticated update" on public.products for update using (auth.role() = 'authenticated');
+create policy "Allow authenticated update" on public.products for update using ((select public.is_admin()));
 drop policy if exists "Allow authenticated delete" on public.products;
-create policy "Allow authenticated delete" on public.products for delete using (auth.role() = 'authenticated');
+create policy "Allow authenticated delete" on public.products for delete using ((select public.is_admin()));
 
 drop policy if exists "Allow public read access" on public.config;
 create policy "Allow public read access" on public.config for select using (true);
 drop policy if exists "Allow authenticated all" on public.config;
-create policy "Allow authenticated all" on public.config for all using (auth.role() = 'authenticated');
+create policy "Allow authenticated all" on public.config for all using ((select public.is_admin()));
 
 -- 5. 自動更新トリガー
 create or replace function public.handle_updated_at() 
@@ -215,7 +239,7 @@ end;
 $$;
 
 -- 7. RPC関数 (データリセット)
--- security definer（RLSを迂回する）ため、関数内でログイン済みかを必ず確認する
+-- security definer（RLSを迂回する）ため、関数内で管理者か（is_admin）を必ず確認する
 create or replace function public.reset_all_data()
 returns void
 language plpgsql
@@ -223,8 +247,8 @@ security definer
 set search_path = public
 as $$
 begin
-  if coalesce(auth.role(), '') <> 'authenticated' then
-    raise exception '権限エラー: ログインが必要です' using errcode = '42501';
+  if not public.is_admin() then
+    raise exception '権限エラー: 管理者のみ実行できます' using errcode = '42501';
   end if;
   truncate table public.items restart identity cascade;
   truncate table public.products cascade;
@@ -251,7 +275,7 @@ end;
 $$;
 
 -- 9. RPC関数 (在庫安全更新)
--- security definer（RLSを迂回する）ため、関数内でログイン済みかを必ず確認する
+-- security definer（RLSを迂回する）ため、関数内で管理者か（is_admin）を必ず確認する
 create or replace function public.increment_stock(item_id bigint, delta integer)
 returns json
 language plpgsql
@@ -261,8 +285,8 @@ as $$
 declare
   updated_row record;
 begin
-  if coalesce(auth.role(), '') <> 'authenticated' then
-    raise exception '権限エラー: ログインが必要です' using errcode = '42501';
+  if not public.is_admin() then
+    raise exception '権限エラー: 管理者のみ実行できます' using errcode = '42501';
   end if;
   update public.items
   set stock = greatest(0, stock + delta),
@@ -755,4 +779,4 @@ create policy "Allow viewer read" on public.request_edit_logs for select using (
 -- 在庫ログは管理者のみ閲覧
 drop policy if exists "Allow public read" on public.stock_logs;
 drop policy if exists "Allow authenticated read" on public.stock_logs;
-create policy "Allow authenticated read" on public.stock_logs for select to authenticated using (true);
+create policy "Allow authenticated read" on public.stock_logs for select to authenticated using ((select public.is_admin()));

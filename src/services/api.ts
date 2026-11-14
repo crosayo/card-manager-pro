@@ -230,6 +230,18 @@ export const api = {
     if (isSupabaseEnabled && supabase) await supabase.auth.signOut();
   },
 
+  // ログイン中のユーザーが管理者（DB の admins 表に登録済み）かを DB関数 is_admin で確かめる。
+  // 失敗したとき（関数が未登録・通信エラーなど）は管理者として扱わない（Q-2026-11-06-1）
+  checkIsAdmin: async (): Promise<boolean> => {
+    if (!isSupabaseEnabled || !supabase) return false;
+    const { data, error } = await supabase.rpc('is_admin');
+    if (error) {
+      console.error('Supabase Error [checkIsAdmin]:', error);
+      return false;
+    }
+    return data === true;
+  },
+
   // --- 招待リンク ---
   // 招待コードを検証し、最終利用日時を記録する（未ログインでも呼べる）
   redeemInvite: async (code: string): Promise<{ valid: boolean; expiresAt?: string; label?: string | null }> => {

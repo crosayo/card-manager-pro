@@ -66,6 +66,8 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [selectedRarities, setSelectedRarities] = useState<string[]>([]);
   const [showOnlyInStock, setShowOnlyInStock] = useState(false);
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+  // 管理者かどうかの確認の連番（ログイン状態が続けて変わったとき、古い確認結果で上書きしない）
+  const adminCheckSeq = useRef(0);
 
   // トーストID: Date.now() だと同一ミリ秒に複数出したとき重複するため連番を付与する
   const toastSeqRef = useRef(0);
@@ -205,7 +207,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const handleLoginToggle = async () => {
     setIsLoading(true);
     try {
-      if (isAdmin) {
+      if (isAdmin || user) {
         await api.signOut();
         setIsAdmin(false);
         setUser(null);
@@ -241,9 +243,26 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     const { data: authListener } = api.onAuthStateChange((session) => {
-      setUser(session?.user ?? null);
-      setIsAdmin(!!session?.user);
-      setIsAuthReady(true);
+      const sessionUser = session?.user ?? null;
+      setUser(sessionUser);
+      const seq = ++adminCheckSeq.current;
+      if (!sessionUser) {
+        setIsAdmin(false);
+        setIsAuthReady(true);
+        return;
+      }
+      // 管理者かは「ログインしているか」ではなく DB の admins 表で判定する（is_admin。Q-2026-11-06-1）。
+      // supabase-js のコールバックの中で別の通信を待つと処理が詰まることがあるため、次のタスクで確かめる。
+      // 確認に失敗したら管理者として扱わない
+      setTimeout(() => {
+        api.checkIsAdmin()
+          .catch(() => false)
+          .then(ok => {
+            if (seq !== adminCheckSeq.current) return;
+            setIsAdmin(ok);
+            setIsAuthReady(true);
+          });
+      }, 0);
     });
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 初回表示時のデータ取得（外部との同期）
     refreshInviteStatus();
