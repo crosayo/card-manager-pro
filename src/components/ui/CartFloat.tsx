@@ -134,7 +134,11 @@ export const CartFloat: React.FC = () => {
         addToast('success', 'リクエスト送信完了', 'リクエストを受け付けました。リクエスト一覧で確認できます。');
       }
     } catch (e) {
-      addToast('error', '送信失敗', getErrorMessage(e));
+      const msg = getErrorMessage(e);
+      // B7: 在庫の上限を超えたときは DB 関数が「在庫が足りません: …」を返す。カードは残したまま直してもらう
+      addToast('error', '送信失敗', msg.startsWith('在庫が足りません')
+        ? `${msg}。カートの枚数を減らしてから送り直してください（ページを再読み込みすると最新の在庫が表示されます）`
+        : msg);
     } finally {
       setIsSending(false);
     }
