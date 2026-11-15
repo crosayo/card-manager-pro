@@ -152,7 +152,7 @@ export const InvitesView: React.FC = () => {
     try {
       replaceInvites([await api.setInviteAutoExtend(invite.id, next)]);
       addToast('success', next ? '自動延長をオンにしました' : '自動延長をオフにしました',
-        next ? `アクセスされるたびに、その時点から${periodLabel(next)}有効になります。` : undefined);
+        next ? `アクセスされるたびに、その時点から${periodLabel(next)}有効になります（自動で延びるのは作成から180日まで）。` : undefined);
     } catch (e) {
       addToast('error', '変更に失敗しました', getErrorMessage(e));
     }
@@ -327,7 +327,7 @@ export const InvitesView: React.FC = () => {
           <span>
             <b>自動延長する</b>
             <span className="block text-xs text-slate-500">
-              アクセスされるたびに、その時点から{periodLabel(days)}有効になります（使われている間は切れません。{periodLabel(days)}使われないと切れます）。
+              アクセスされるたびに、その時点から{periodLabel(days)}有効になります（{periodLabel(days)}使われないと切れます）。自動で延びるのは作成から180日までで、それより先は「延長」で手動で延ばします。
             </span>
           </span>
         </label>

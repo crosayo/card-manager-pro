@@ -7,6 +7,8 @@ import type { User } from '@supabase/supabase-js';
 import { ToastType, AppError, News, Product, Season, SystemInfo, InviteStatus } from '@/types';
 import { api } from '@/services/api';
 import { getInviteCode } from '@/lib/invite';
+import { InStockChoice, resolveShowOnlyInStock } from '@/lib/inStockFilter';
+import { AdminCheckResult, nextIsAdmin } from '@/lib/adminCheck';
 import { INITIAL_RARITIES, INITIAL_SEASONS, INITIAL_SYSTEM_INFO } from '@/constants';
 import { getErrorMessage } from '@/utils';
 
@@ -64,8 +66,16 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [seasons, setSeasons] = useState<Season[]>(INITIAL_SEASONS);
   const [systemInfo, setSystemInfo] = useState<SystemInfo>(INITIAL_SYSTEM_INFO);
   const [selectedRarities, setSelectedRarities] = useState<string[]>([]);
-  const [showOnlyInStock, setShowOnlyInStock] = useState(false);
+  // 在庫ありだけ表示: 管理者でなければ初期値 true、管理者なら false（企画書の決定。src/lib/inStockFilter.ts）。
+  // 切り替えた値は立場（管理者か）ごとに覚え、立場が変わったらその立場の初期値に戻る
+  const [inStockChoice, setInStockChoice] = useState<InStockChoice>(null);
+  const showOnlyInStock = resolveShowOnlyInStock(isAdmin, inStockChoice);
+  const setShowOnlyInStock = useCallback((val: boolean) => setInStockChoice({ forAdmin: isAdmin, value: val }), [isAdmin]);
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+  // 管理者かどうかの確認の連番（ログイン状態が続けて変わったとき、古い確認結果で上書きしない）
+  const adminCheckSeq = useRef(0);
+  // 直前のログインユーザー（同じユーザーのままの出来事かを見分ける）
+  const lastUserIdRef = useRef<string | null>(null);
 
   // トーストID: Date.now() だと同一ミリ秒に複数出したとき重複するため連番を付与する
   const toastSeqRef = useRef(0);
@@ -205,7 +215,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const handleLoginToggle = async () => {
     setIsLoading(true);
     try {
-      if (isAdmin) {
+      if (isAdmin || user) {
         await api.signOut();
         setIsAdmin(false);
         setUser(null);
@@ -240,10 +250,33 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   useEffect(() => {
-    const { data: authListener } = api.onAuthStateChange((session) => {
-      setUser(session?.user ?? null);
-      setIsAdmin(!!session?.user);
-      setIsAuthReady(true);
+    const { data: authListener } = api.onAuthStateChange((session, event) => {
+      const sessionUser = session?.user ?? null;
+      setUser(sessionUser);
+      const sameUser = sessionUser !== null && sessionUser.id === lastUserIdRef.current;
+      lastUserIdRef.current = sessionUser?.id ?? null;
+      const seq = ++adminCheckSeq.current;
+      if (!sessionUser) {
+        setIsAdmin(false);
+        setIsAuthReady(true);
+        return;
+      }
+      // 管理者かは「ログインしているか」ではなく DB の admins 表で判定する（is_admin。Q-2026-11-06-1）。
+      // supabase-js のコールバックの中で別の通信を待つと処理が詰まることがあるため、次のタスクで確かめる。
+      // 確認に失敗したら管理者として扱わない。ただしトークンの自動更新など同じユーザーのままなら直前の値を保つ（src/lib/adminCheck.ts）
+      setTimeout(() => {
+        api.checkIsAdmin()
+          .then((isAdminNow): AdminCheckResult => ({ ok: true, isAdmin: isAdminNow }))
+          .catch((e): AdminCheckResult => {
+            console.error('管理者かどうかの確認に失敗しました', e);
+            return { ok: false };
+          })
+          .then(result => {
+            if (seq !== adminCheckSeq.current) return;
+            setIsAdmin(prev => nextIsAdmin(event, sameUser, prev, result));
+            setIsAuthReady(true);
+          });
+      }, 0);
     });
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 初回表示時のデータ取得（外部との同期）
     refreshInviteStatus();

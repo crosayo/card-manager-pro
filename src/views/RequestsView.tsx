@@ -2,15 +2,15 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ShoppingBag, ClipboardList, LoaderCircle, ChevronDown, ChevronRight, Check, X, PenLine, Trash, RefreshCw, Link2, Info, Undo2, TriangleAlert } from 'lucide-react';
 import { CardRequest, Item, RequestItem, RequestEditLog } from '@/types';
 import { api } from '@/services/api';
 import { useAppContext } from '@/context/AppContext';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { RARITY_STYLES, RARITY_DEFAULT_STYLE } from '@/constants';
+import { RARITY_STYLES, RARITY_DEFAULT_STYLE, REQUEST_MESSAGE_MAX_LENGTH } from '@/constants';
 import { buildRequestEditUrl, getSavedRequestTokens, saveRequestToken } from '@/lib/requestTokens';
+import { takeSecretParam } from '@/lib/urlSecret';
 import { getErrorMessage } from '@/utils';
 import { PageContainer, PageHeader } from '@/components/layout/Page';
 
@@ -49,8 +49,6 @@ const getRarityStyle = (rarity: string): string => {
 
 export const RequestsView: React.FC = () => {
   const { isAdmin, addToast, rarities, refreshPendingRequestsCount } = useAppContext();
-  const router = useRouter();
-  const searchParams = useSearchParams();
   const [requests, setRequests] = useState<CardRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<CardRequest['status'] | 'all'>('all');
@@ -81,7 +79,6 @@ export const RequestsView: React.FC = () => {
 
   // 完了モーダル状態（管理者用）
   const [completingRequest, setCompletingRequest] = useState<CardRequest | null>(null);
-  const [unitPrices, setUnitPrices] = useState<Record<number, number>>({});
   const [adminMemo, setAdminMemo] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
 
@@ -97,7 +94,7 @@ export const RequestsView: React.FC = () => {
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await api.fetchRequests(undefined, { includeToken: isAdmin });
+      const data = await api.fetchRequests(undefined, { asAdmin: isAdmin });
       setRequests(data);
       // 一覧を読んだ時点の件数にバッジをそろえる（新着が届いていた場合も反映）
       if (isAdmin) refreshPendingRequestsCount();
@@ -114,8 +111,20 @@ export const RequestsView: React.FC = () => {
   // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage はサーバー描画時に読めないため、ハイドレーション後に読む
   useEffect(() => { setOwnedTokens(getSavedRequestTokens()); }, []);
 
-  // 編集用リンク（/requests?token=...）から開かれた場合: トークンを照合してこのブラウザに保存する
-  const tokenParam = searchParams.get('token');
+  // 編集用リンク（/requests#token=...。以前の /requests?token=... も読む）から開かれた場合:
+  // トークンをすぐに URL から消し（アドレスバー・履歴に残さない）、照合してこのブラウザに保存する（Q-2026-11-06-7）
+  const [tokenParam, setTokenParam] = useState<string | null>(null);
+  useEffect(() => {
+    const take = () => {
+      const { value, cleanedUrl } = takeSecretParam(window.location.href, 'token');
+      if (cleanedUrl !== null) window.history.replaceState(window.history.state, '', cleanedUrl);
+      if (value) setTokenParam(value);
+    };
+    take();
+    // 同じページで別の編集用リンク（#token=...）を開いたとき
+    window.addEventListener('hashchange', take);
+    return () => window.removeEventListener('hashchange', take);
+  }, []);
   useEffect(() => {
     if (!tokenParam) return;
     let cancelled = false;
@@ -135,12 +144,11 @@ export const RequestsView: React.FC = () => {
       } catch (e) {
         if (!cancelled) addToast('error', '編集用リンクの確認に失敗しました', getErrorMessage(e));
       } finally {
-        // トークンをアドレスバーや履歴に残さない
-        if (!cancelled) router.replace('/requests');
+        if (!cancelled) setTokenParam(null);
       }
     })();
     return () => { cancelled = true; };
-  }, [tokenParam, addToast, router]);
+  }, [tokenParam, addToast]);
 
   // 編集用リンクから開いたリクエストまでスクロール
   useEffect(() => {
@@ -274,26 +282,10 @@ export const RequestsView: React.FC = () => {
   const doSwap = async (req: CardRequest, ri: RequestItem, newItem: Item) => {
     try {
       let updated: CardRequest;
-      let stockFailures: string[] = [];
       if (isAdmin) {
-        await api.swapRequestItem(ri.id, newItem.id);
-        const oldLabel = `${ri.item?.name ?? ''} ${ri.item?.cardId ?? ''} ${ri.item?.rarity ?? ''}`.trim();
-        const newLabel = `${newItem.name} ${newItem.cardId} ${newItem.rarity}`;
-        await api.addRequestEditLog({
-          requestId: req.id,
-          editorName: '管理者',
-          fieldChanged: 'カード変更',
-          oldValue: oldLabel,
-          newValue: newLabel,
-        }).catch(e => console.warn('ログ記録失敗:', e));
-        // 完了済みなら、元のカードの在庫を戻し、差し替え先の在庫を減らす
-        if (req.status === 'completed' && ri.itemId) {
-          stockFailures = await applyStockAdjustments(req.id, [
-            { itemId: ri.itemId, delta: ri.quantity, label: oldLabel },
-            { itemId: newItem.id, delta: -ri.quantity, label: newLabel },
-          ], '完了済みリクエストの編集');
-        }
-        updated = await api.fetchRequestById(req.id, { includeToken: true });
+        // 差し替え・編集履歴・完了済みなら在庫の差分を、DB関数で1つのトランザクションとして行う（Q-2026-11-06-5）
+        await api.changeRequestItemAsAdmin(ri.id, newItem.id, ri.quantity);
+        updated = await api.fetchRequestById(req.id, { asAdmin: true });
       } else {
         updated = await api.swapRequestItemByToken(ownedTokens[req.id], ri.id, newItem.id);
       }
@@ -302,11 +294,7 @@ export const RequestsView: React.FC = () => {
       setExpandedLogs(prev => ({ ...prev, [req.id]: false }));
       setSwappingItemId(null);
       setSwapAlternatives([]);
-      if (stockFailures.length > 0) {
-        notifyStockFailures(stockFailures);
-      } else {
-        addToast('success', 'カード変更完了', `${newItem.rarity} / ${newItem.cardId} に変更しました。`);
-      }
+      addToast('success', 'カード変更完了', `${newItem.rarity} / ${newItem.cardId} に変更しました。`);
     } catch (e) {
       addToast('error', '変更失敗', getErrorMessage(e));
     }
@@ -344,7 +332,8 @@ export const RequestsView: React.FC = () => {
     }
   };
 
-  // 変更パネルの内容をすぐに保存する（カードの差し替え・枚数変更・編集履歴、完了済みなら在庫の差分も反映）
+  // 変更パネルの内容をすぐに保存する（カードの差し替え・枚数変更・編集履歴、完了済みなら在庫の差分と在庫ログ）。
+  // DB関数 change_request_item_as_admin が1つのトランザクションで行うため、失敗したときは何も変わらない（Q-2026-11-06-5）
   const applyChange = async (req: CardRequest, ri: RequestItem) => {
     const target = changeOptions.find(o => o.id === changeTargetId);
     if (!ri.item || !target) return;
@@ -353,37 +342,15 @@ export const RequestsView: React.FC = () => {
     if (!isSwap && quantity === ri.quantity) { closeChange(); return; }
     setIsUpdating(true);
     try {
-      const oldLabel = `${ri.item.name} ${ri.item.cardId} ${ri.item.rarity}`;
       const newLabel = `${target.name} ${target.cardId} ${target.rarity}`;
-      if (isSwap) {
-        await api.swapRequestItem(ri.id, target.id);
-        await api.addRequestEditLog({ requestId: req.id, editorName: '管理者', fieldChanged: 'カード変更', oldValue: oldLabel, newValue: newLabel })
-          .catch(e => console.warn('ログ記録失敗:', e));
-      }
-      if (quantity !== ri.quantity) {
-        await api.editRequestAsAdmin(req.id, { itemChanges: [{ requestItemId: ri.id, quantity }] });
-        await api.addRequestEditLog({ requestId: req.id, editorName: '管理者', fieldChanged: '数量', oldValue: `${ri.item.name}: ${ri.quantity}枚`, newValue: `${target.name}: ${quantity}枚` })
-          .catch(e => console.warn('ログ記録失敗:', e));
-      }
-      // 完了済みなら、元のカードの在庫を戻し、変更先の在庫を減らす（同じカードなら枚数の差分だけ）
-      let stockFailures: string[] = [];
-      if (req.status === 'completed') {
-        const adjustments: StockAdjustment[] = isSwap
-          ? [{ itemId: ri.item.id, delta: ri.quantity, label: oldLabel }, { itemId: target.id, delta: -quantity, label: newLabel }]
-          : [{ itemId: ri.item.id, delta: ri.quantity - quantity, label: oldLabel }];
-        stockFailures = await applyStockAdjustments(req.id, adjustments, '完了済みリクエストの編集');
-      }
-      const updated = await api.fetchRequestById(req.id, { includeToken: true });
+      await api.changeRequestItemAsAdmin(ri.id, target.id, quantity);
+      const updated = await api.fetchRequestById(req.id, { asAdmin: true });
       setRequests(prev => prev.map(r => r.id === req.id ? updated : r));
       setEditQuantities(prev => ({ ...prev, [ri.id]: quantity }));
       setLogsCache(prev => { const next = { ...prev }; delete next[req.id]; return next; });
       setExpandedLogs(prev => ({ ...prev, [req.id]: false }));
       closeChange();
-      if (stockFailures.length > 0) {
-        notifyStockFailures(stockFailures);
-      } else {
-        addToast('success', '変更しました', `${newLabel} / ${quantity}枚`);
-      }
+      addToast('success', '変更しました', `${newLabel} / ${quantity}枚`);
     } catch (e) {
       addToast('error', '変更失敗', getErrorMessage(e));
     } finally {
@@ -486,21 +453,14 @@ export const RequestsView: React.FC = () => {
 
   const openCompleteModal = (req: CardRequest) => {
     setCompletingRequest(req);
-    const prices: Record<number, number> = {};
-    req.items?.forEach(ri => { prices[ri.id] = ri.unitPrice ?? 0; });
-    setUnitPrices(prices);
     setAdminMemo('');
   };
-
-  const priceTotal = Object.values(unitPrices).reduce((sum, p) => sum + (p || 0), 0);
 
   const confirmComplete = async () => {
     if (!completingRequest) return;
     setIsUpdating(true);
     try {
       const updated = await api.updateRequestStatus(completingRequest.id, 'completed', {
-        unitPrices,
-        priceTotal,
         adminMemo,
       });
 
@@ -839,6 +799,7 @@ export const RequestsView: React.FC = () => {
                       <label className="text-xs font-bold text-slate-600 mb-1 block">メモ</label>
                       <textarea
                         value={editMessage}
+                        maxLength={REQUEST_MESSAGE_MAX_LENGTH}
                         onChange={(e) => setEditMessage(e.target.value)}
                         className="w-full border border-slate-300 rounded px-3 py-1.5 text-sm h-16 resize-none focus:ring-2 focus:ring-cyan-500 outline-none"
                       />
@@ -884,7 +845,7 @@ export const RequestsView: React.FC = () => {
                               </div>
                             )}
                           </div>
-                          <span className="font-bold text-slate-600 shrink-0">{ri.quantity}枚{ri.unitPrice ? ` (¥${ri.unitPrice.toLocaleString()})` : ''}</span>
+                          <span className="font-bold text-slate-600 shrink-0">{ri.quantity}枚</span>
                         </div>
                       ))}
                     </div>
@@ -893,10 +854,6 @@ export const RequestsView: React.FC = () => {
                       <div className="bg-slate-50 rounded px-3 py-2 text-sm text-slate-600 mb-3">
                         <span className="text-slate-400 text-xs">メモ: </span>{req.message}
                       </div>
-                    )}
-
-                    {req.priceTotal && (
-                      <div className="text-sm font-bold text-slate-700 mb-2">合計: ¥{req.priceTotal.toLocaleString()}</div>
                     )}
 
                     {req.adminMemo && (
@@ -1023,7 +980,7 @@ export const RequestsView: React.FC = () => {
               <button onClick={() => setCompletingRequest(null)} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
             </div>
             <div className="p-5 space-y-4">
-              {/* 単価入力 */}
+              {/* 完了するカード・サプライ */}
               <div className="space-y-2">
                 {completingRequest.items?.map(ri => (
                   <div key={ri.id} className="flex items-center gap-3">
@@ -1038,22 +995,8 @@ export const RequestsView: React.FC = () => {
                         </div>
                       )}
                     </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-sm text-slate-500">¥</span>
-                      <input
-                        type="number"
-                        min={0}
-                        value={unitPrices[ri.id] ?? 0}
-                        onChange={(e) => setUnitPrices(prev => ({ ...prev, [ri.id]: Number(e.target.value) }))}
-                        className="w-24 border border-slate-300 rounded px-2 py-1 text-sm text-right"
-                      />
-                    </div>
                   </div>
                 ))}
-              </div>
-
-              <div className="bg-slate-50 rounded px-3 py-2 text-right font-bold text-slate-800">
-                合計: ¥{priceTotal.toLocaleString()}
               </div>
 
               <div>

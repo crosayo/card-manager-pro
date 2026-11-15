@@ -5,7 +5,17 @@ import { Item, Product, PaginatedItems, SortConfig, Season, News, SystemInfo, St
 import { INITIAL_RARITIES, INITIAL_SEASONS, INITIAL_SYSTEM_INFO } from '../constants';
 import { normalizeForStorage, toSearchKey, toSearchTokens, getErrorMessage } from '../utils';
 
-type ItemFilters = { category?: string | null, search?: string, showZeroStock?: boolean, rarities?: string[], rarityOrder?: string[] };
+// 在庫ログの絞り込み条件。from / to は日本時間の日付（YYYY-MM-DD）
+export type StockLogFilters = { source?: StockLog['source']; from?: string; to?: string; cardName?: string };
+
+// YYYY-MM-DD の翌日を YYYY-MM-DD で返す（期間の終わりを「翌日0時より前」で表すため）
+const nextDate = (ymd: string): string => {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+};
+
+export type ItemFilters = { category?: string | null, search?: string, showZeroStock?: boolean, rarities?: string[], rarityOrder?: string[] };
 
 // DBの行（snake_case）。supabase-js に DB の型定義を渡していないため、取得結果にはここで型を付ける
 type DbItem = { id: number; name: string; card_id: string; rarity: string; stock: number; category: string; updated_at: string | null };
@@ -26,7 +36,7 @@ type DbRequestItem = {
 };
 type DbRequest = {
   id: number; token?: string; requester_name: string; message: string | null; status: CardRequest['status'];
-  price_total: number | null; admin_memo: string | null; created_at: string; resolved_at: string | null;
+  price_total: number | null; admin_memo?: string | null; created_at: string; resolved_at: string | null;
   request_items?: DbRequestItem[] | null;
 };
 type DbRequestEditLog = {
@@ -117,7 +127,7 @@ const mapDbRequestToAppRequest = (db: DbRequest): CardRequest => ({
   message: db.message,
   status: db.status,
   priceTotal: db.price_total,
-  adminMemo: db.admin_memo,
+  adminMemo: db.admin_memo ?? null,
   createdAt: db.created_at,
   resolvedAt: db.resolved_at,
   items: db.request_items ? db.request_items.map(mapDbRequestItemToAppRequestItem) : undefined,
@@ -143,10 +153,12 @@ const mapDbInviteAccessLog = (db: DbInviteAccessLog): InviteAccessLog => ({
   userAgent: db.user_agent,
 });
 
-// requests テーブルの取得列（token は管理者のみ取得する。anon には列単位で閲覧権限がない）
-const REQUEST_PUBLIC_COLUMNS = 'id, requester_name, message, status, price_total, admin_memo, created_at, resolved_at';
-const requestSelect = (includeToken?: boolean) =>
-  `${REQUEST_PUBLIC_COLUMNS}${includeToken ? ', token' : ''}, request_items(*, items(*), supplies(*))`;
+// requests テーブルの取得列。token（編集用リンク）と admin_memo（管理者メモ）は管理者のときだけ取得する
+// （anon には列単位で閲覧権限がない。admin_memo は Q-2026-11-06-2 で anon の権限から外す）
+const REQUEST_PUBLIC_COLUMNS = 'id, requester_name, message, status, price_total, created_at, resolved_at';
+const REQUEST_ADMIN_COLUMNS = 'token, admin_memo';
+const requestSelect = (asAdmin?: boolean) =>
+  `${REQUEST_PUBLIC_COLUMNS}${asAdmin ? `, ${REQUEST_ADMIN_COLUMNS}` : ''}, request_items(*, items(*), supplies(*))`;
 
 const mapDbNewsToAppNews =(dbNews: DbNews): News => ({
   id: dbNews.id,
@@ -202,9 +214,9 @@ const ensureConnection = () => {
 
 export const api = {
   // --- Auth ---
-  onAuthStateChange: (callback: (session: Session | null) => void) => {
+  onAuthStateChange: (callback: (session: Session | null, event: string) => void) => {
     if (isSupabaseEnabled && supabase) {
-      return supabase.auth.onAuthStateChange((_event, session) => callback(session));
+      return supabase.auth.onAuthStateChange((event, session) => callback(session, event));
     }
     return { data: { subscription: { unsubscribe: () => {} } } };
   },
@@ -218,6 +230,16 @@ export const api = {
 
   signOut: async () => {
     if (isSupabaseEnabled && supabase) await supabase.auth.signOut();
+  },
+
+  // ログイン中のユーザーが管理者（DB の admins 表に登録済み）かを DB関数 is_admin で確かめる。
+  // 失敗したとき（関数が未登録・通信エラーなど）は管理者として扱わない（Q-2026-11-06-1）
+  // 管理者か（DB の is_admin()）。通信エラー・DB エラーは例外にする（「管理者でない」と区別するため。呼び出し側で扱う）
+  checkIsAdmin: async (): Promise<boolean> => {
+    if (!isSupabaseEnabled || !supabase) return false;
+    const { data, error } = await supabase.rpc('is_admin');
+    if (error) handleSupabaseError(error, 'checkIsAdmin');
+    return data === true;
   },
 
   // --- 招待リンク ---
@@ -419,6 +441,20 @@ export const api = {
     return mapDbItemToAppItem(data);
   },
 
+  // Wiki 取込: 型番の頭（セットコード。英数字だけ）が同じ既存行の収録パック名（行ごと。src/lib/packMatch.ts で数える）
+  fetchCategoriesBySetCode: async (setCode: string): Promise<string[]> => {
+    ensureConnection();
+    if (!/^[A-Z0-9]+$/.test(setCode)) return [];
+    const { data, error } = await supabase
+      .from('items')
+      .select('category')
+      .ilike('card_id', `${setCode}-JP%`)
+      // PostgREST の1回の上限（Supabase の既定 max rows）は 1000 行。1パックの行数はこれより少なく、候補を選ぶには足りる
+      .limit(1000);
+    if (error) handleSupabaseError(error, 'fetchCategoriesBySetCode');
+    return (data || []).map((r: { category: string | null }) => r.category ?? '');
+  },
+
   // --- Items (Smart Pagination) ---
   // 検索・絞り込み・ソート・ページネーションはすべてDB関数 search_items で行う。
   // 検索ワードは空白区切りのAND検索で、表記ゆれ（全角/半角・ひらがな/カタカナ・
@@ -460,6 +496,23 @@ export const api = {
       data:  ((rpcResult as SearchItemsResult)?.data  || []).map(mapDbItemToAppItem),
       count: (rpcResult  as SearchItemsResult)?.count || 0,
     };
+  },
+
+  // 検索条件に一致する全件を、画面と同じ並び順で取得する（CSV出力用。C1）
+  // search_items を pageSize 件ずつ呼び、count に届くまで繰り返す。
+  // search_items は最後に id で並べるため、ページをまたいでも重複・抜けは出ない（出力中にデータが変わった場合を除く）
+  fetchAllMatchingItems: async (
+    filters?: ItemFilters,
+    sort?: SortConfig,
+    pageSize: number = 500
+  ): Promise<Item[]> => {
+    const all: Item[] = [];
+    for (let page = 1; ; page++) {
+      const { data, count } = await api.fetchItems(page, pageSize, filters, sort);
+      all.push(...data);
+      if (data.length < pageSize || all.length >= count) break;
+    }
+    return all;
   },
 
   // 内部用: 全件取得ヘルパー
@@ -949,30 +1002,49 @@ export const api = {
     }
   },
 
-  fetchStockLogs: async (limit: number = 50): Promise<StockLog[]> => {
+  // 在庫ログを新しい順にページ単位で取得する（05 §0 C2）。
+  // 期間は日本時間の日付（YYYY-MM-DD、両端を含む）。カード名の絞り込みは在庫一覧の検索と同じく
+  // items.search_key（カード名・型番・収録パック）に対する空白区切りの AND 検索で、サプライのログは対象外になる。
+  fetchStockLogs: async (
+    page: number = 1,
+    pageSize: number = 50,
+    filters?: StockLogFilters
+  ): Promise<{ data: StockLog[]; count: number }> => {
     ensureConnection();
-    const { data, error } = await supabase
+    const tokens = toSearchTokens(filters?.cardName ?? '');
+    // カード名で絞るときは items を内部結合にして、結合先の列で絞り込めるようにする
+    const itemsEmbed = tokens.length > 0 ? 'items!inner(name, card_id, rarity)' : 'items(name, card_id, rarity)';
+    let query = supabase
       .from('stock_logs')
-      .select('*, items(name, card_id, rarity), supplies(name)')
+      .select(`*, ${itemsEmbed}, supplies(name)`, { count: 'exact' });
+
+    if (filters?.source) query = query.eq('source', filters.source);
+    if (filters?.from) query = query.gte('created_at', `${filters.from}T00:00:00+09:00`);
+    if (filters?.to) query = query.lt('created_at', `${nextDate(filters.to)}T00:00:00+09:00`);
+    // toSearchKey が記号（% _ \ など）を取り除くため、トークンはそのまま LIKE に使える
+    for (const t of tokens) query = query.like('items.search_key', `%${t}%`);
+
+    const { data, error, count } = await query
       .order('created_at', { ascending: false })
-      .limit(limit);
+      .order('id', { ascending: false })
+      .range((page - 1) * pageSize, page * pageSize - 1);
     if (error) {
-      if (error.code === '42P01') return [];
+      if (error.code === '42P01') return { data: [], count: 0 };
       handleSupabaseError(error, 'fetchStockLogs');
     }
-    return (data || []).map(mapDbStockLogToAppStockLog);
+    return { data: (data || []).map(mapDbStockLogToAppStockLog), count: count ?? 0 };
   },
 
   // --- Requests ---
-  // 編集用トークンは未ログインユーザーには返さない（DB側でも列単位で閲覧を禁止している）
+  // 編集用トークン・管理者メモは管理者（asAdmin）のときだけ取得する（DB側でも anon は列単位で閲覧できない）
   fetchRequests: async (
     status?: 'pending' | 'completed' | 'cancelled',
-    options?: { includeToken?: boolean }
+    options?: { asAdmin?: boolean }
   ): Promise<CardRequest[]> => {
     ensureConnection();
     let query = supabase
       .from('requests')
-      .select<string, DbRequest>(requestSelect(options?.includeToken))
+      .select<string, DbRequest>(requestSelect(options?.asAdmin))
       .order('created_at', { ascending: false });
     if (status) query = query.eq('status', status);
     const { data, error } = await query;
@@ -983,11 +1055,11 @@ export const api = {
     return (data || []).map(mapDbRequestToAppRequest);
   },
 
-  fetchRequestById: async (id: number, options?: { includeToken?: boolean }): Promise<CardRequest> => {
+  fetchRequestById: async (id: number, options?: { asAdmin?: boolean }): Promise<CardRequest> => {
     ensureConnection();
     const { data, error } = await supabase
       .from('requests')
-      .select<string, DbRequest>(requestSelect(options?.includeToken))
+      .select<string, DbRequest>(requestSelect(options?.asAdmin))
       .eq('id', id)
       .single();
     if (error) handleSupabaseError(error, 'fetchRequestById');
@@ -1119,7 +1191,7 @@ export const api = {
       throwIfAnyFailed(results, 'updateRequestStatus(unitPrices)');
     }
 
-    return api.fetchRequestById(requestId, { includeToken: true });
+    return api.fetchRequestById(requestId, { asAdmin: true });
   },
 
   // 管理者による編集（ログイン済みのためDBのRLS/権限で保護される）
@@ -1166,7 +1238,7 @@ export const api = {
       if (error) handleSupabaseError(error, 'editRequest(addItems)');
     }
 
-    return api.fetchRequestById(requestId, { includeToken: true });
+    return api.fetchRequestById(requestId, { asAdmin: true });
   },
 
   addRequestEditLog: async (params: {
@@ -1362,7 +1434,8 @@ export const api = {
       await fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: lines.join('\n') }),
+        // 申請者の名前・メモに @everyone などが入っていても通知（メンション）にならないようにする（Q-2026-11-06-6）
+        body: JSON.stringify({ content: lines.join('\n'), allowed_mentions: { parse: [] } }),
       });
     } catch (e) {
       console.warn('Discord通知の送信に失敗しました:', e);
@@ -1448,14 +1521,22 @@ export const api = {
     return (data || []).map(mapDbItemToAppItem);
   },
 
-  // リクエストアイテムのカードを別バリアントに差し替え（名前確認不要）
-  swapRequestItem: async (requestItemId: number, newItemId: number): Promise<void> => {
+  // 管理者によるカード変更（D8）: 同名カードの別型番・別レアリティへの差し替えと枚数変更、編集履歴、
+  // 完了済みなら在庫の差分と在庫ログを、DB関数 change_request_item_as_admin で1つのトランザクションとして行う
+  // （途中で失敗しても在庫と明細が食い違わない。Q-2026-11-06-5）
+  changeRequestItemAsAdmin: async (requestItemId: number, newItemId: number, quantity: number): Promise<void> => {
     ensureConnection();
-    const { error } = await supabase
-      .from('request_items')
-      .update({ item_id: newItemId })
-      .eq('id', requestItemId);
-    if (error) handleSupabaseError(error, 'swapRequestItem');
+    const { error } = await supabase.rpc('change_request_item_as_admin', {
+      p_request_item_id: requestItemId,
+      p_new_item_id: newItemId,
+      p_quantity: quantity,
+    });
+    if (error) {
+      if (isMissingFunction(error)) {
+        throw new Error('DB関数 change_request_item_as_admin が未登録です。改修ログ（2026-11-14 点検指摘の一括修正）の SQL を実行してください。');
+      }
+      handleSupabaseError(error, 'changeRequestItemAsAdmin');
+    }
   },
 
   fetchPendingRequestsCount: async (): Promise<number> => {

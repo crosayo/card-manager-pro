@@ -62,3 +62,7 @@ export const getRarityStyle = (rarity: string): string => {
   const style = RARITY_STYLES[rarity] ?? RARITY_DEFAULT_STYLE;
   return `${style.bg} ${style.text} border ${style.border}`;
 };
+
+// リクエストの入力の上限（DB関数 create_request・edit_request_by_token と同じ値。Q-2026-11-06-3）
+export const REQUEST_NAME_MAX_LENGTH = 50;
+export const REQUEST_MESSAGE_MAX_LENGTH = 1000;

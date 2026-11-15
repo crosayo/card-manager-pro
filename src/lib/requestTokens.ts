@@ -1,6 +1,8 @@
 // リクエストの編集用トークンをブラウザに保存する（同じブラウザなら編集用リンクを開かずに編集できる）
 // localStorage はプライベートブラウズ等で使えない場合があるため、失敗しても動作は継続する
 
+import { buildSecretUrl } from './urlSecret';
+
 const STORAGE_KEY = 'card-manager:request-tokens';
 
 export function getSavedRequestTokens(): Record<number, string> {
@@ -23,6 +25,8 @@ export function saveRequestToken(requestId: number, token: string): void {
   }
 }
 
+// 編集用リンク。トークンは fragment で渡す（サーバーに送られず、アクセスログに残らない。Q-2026-11-06-7）。
+// 以前の /requests?token=… のリンクも RequestsView が読む
 export function buildRequestEditUrl(token: string): string {
-  return `${window.location.origin}/requests?token=${encodeURIComponent(token)}`;
+  return buildSecretUrl(window.location.origin, '/requests', 'token', token);
 }

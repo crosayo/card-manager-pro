@@ -192,7 +192,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ stats }) => {
                   {isAdmin && (
                     <button 
                       onClick={() => handleDeleteNews(item.id)}
-                      className="absolute top-4 right-4 p-2 bg-white/80 hover:bg-rose-600 hover:text-white rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-all shadow-sm"
+                      className="absolute top-4 right-4 p-2 bg-white/80 hover:bg-rose-600 hover:text-white rounded-lg text-slate-400 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100 transition-all shadow-sm"
                       title="削除"
                     >
                       <Trash size={16} />

@@ -8,6 +8,7 @@ import { api } from '@/services/api';
 import { useAppContext } from '@/context/AppContext';
 import { buildRequestEditUrl, saveRequestToken } from '@/lib/requestTokens';
 import { getErrorMessage } from '@/utils';
+import { REQUEST_MESSAGE_MAX_LENGTH, REQUEST_NAME_MAX_LENGTH } from '@/constants';
 
 export const CartFloat: React.FC = () => {
   const { cartItems, removeFromCart, updateQuantity, clearCart, totalCount } = useCart();
@@ -134,7 +135,11 @@ export const CartFloat: React.FC = () => {
         addToast('success', 'リクエスト送信完了', 'リクエストを受け付けました。リクエスト一覧で確認できます。');
       }
     } catch (e) {
-      addToast('error', '送信失敗', getErrorMessage(e));
+      const msg = getErrorMessage(e);
+      // B7: 在庫の上限を超えたときは DB 関数が「在庫が足りません: …」を返す。カードは残したまま直してもらう
+      addToast('error', '送信失敗', msg.startsWith('在庫が足りません')
+        ? `${msg}。カートの枚数を減らしてから送り直してください（ページを再読み込みすると最新の在庫が表示されます）`
+        : msg);
     } finally {
       setIsSending(false);
     }
@@ -235,6 +240,7 @@ export const CartFloat: React.FC = () => {
                   type="text"
                   required
                   value={requesterName}
+                  maxLength={REQUEST_NAME_MAX_LENGTH}
                   onChange={(e) => setRequesterName(e.target.value)}
                   className="w-full border border-slate-300 rounded px-3 py-2 focus:ring-2 focus:ring-cyan-500 outline-none"
                   placeholder="例: 山田太郎"
@@ -245,6 +251,7 @@ export const CartFloat: React.FC = () => {
                 <label className="block text-sm font-bold text-slate-700 mb-1">一言メモ（任意）</label>
                 <textarea
                   value={message}
+                  maxLength={REQUEST_MESSAGE_MAX_LENGTH}
                   onChange={(e) => setMessage(e.target.value)}
                   className="w-full border border-slate-300 rounded px-3 py-2 focus:ring-2 focus:ring-cyan-500 outline-none h-20 resize-none"
                   placeholder="備考など..."

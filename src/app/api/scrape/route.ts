@@ -1,7 +1,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { getErrorMessage } from '@/utils';
+import { CARD_ID_RE } from '@/lib/cardId';
+import { normalizeRarity } from '@/lib/rarity';
+import { extractElementContents } from '@/lib/htmlElements';
+import { BodyTooLargeError, readBodyWithLimit } from '@/lib/fetchLimit';
 
 // ── HTML ユーティリティ ──────────────────────────────────────────
 function decodeEntities(str: string): string {
@@ -20,90 +23,16 @@ function stripTags(html: string): string {
 }
 
 function extractAnchorText(cellHtml: string): string {
-  const m = cellHtml.match(/<a[^>]*>([\s\S]*?)<\/a>/);
-  if (!m) return '';
+  const [inner] = extractElementContents(cellHtml, 'a', 1);
+  if (inner === undefined) return '';
   // アンカー内のHTMLタグ（<span>等）を除去してテキストのみ取得
-  return decodeEntities(m[1].replace(/<[^>]+>/g, '').trim());
+  return decodeEntities(inner.replace(/<[^>]+>/g, '').trim());
 }
-
-// 「26LP-JP001」のように数字始まりの型番もあるため、英字を1文字以上含む英数字を許容する
-// 「IMPH-JPS01」（＋1パック）「IMPH-JPT01」（トークン）のようにJPの後に英字が入る型番も拾う
-const CARD_ID_RE = /\b((?=[0-9]*[A-Z])[A-Z0-9]+-JP(?:\d{3,4}|[A-Z]\d{2,3}))\b/;
 
 interface RawEntry {
   cardId: string;
   name: string;
   rawRarity: string;
-}
-
-// matchAll の代替（TypeScript target 互換）
-function execAll(str: string, pattern: RegExp): RegExpExecArray[] {
-  const results: RegExpExecArray[] = [];
-  const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g');
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(str)) !== null) results.push(m);
-  return results;
-}
-
-// ── レアリティ正規化（Gemini不要・固定マッピング） ───────────────
-// 複合レアリティを先にスキャンして除去し、残りでノーマル・レアを判定する
-// 「○○ Rare」の「Rare」を省略した英語表記（例: 単に "Ultra" "Secret"）も
-// wiki上でよく使われるため、\bによる単語単位マッチも併記して拾う
-// コードは公式カードデータベースの略号にそろえる（2026-11-08 レアリティ整理。constants.ts の INITIAL_RARITIES）。
-// 長い名前（複合）を先に置く。先に一致した部分は除去されるので、たとえば
-// 「プリズマティックシークレットレア」が「シークレットレア」として二重に拾われることはない。
-const COMPOUND_RARITY_PATTERNS: Array<{ pattern: RegExp; code: string }> = [
-  { pattern: /クォーターセンチュリーシークレットレア|quarter.?century.?secret(?:.?rare)?|25th.?se/gi, code: 'QCSE' },
-  { pattern: /プリズマティックシークレットレア|prismatic.?secret(?:.?rare)?/gi,                        code: 'PSE' },
-  { pattern: /エクストラシークレットレア|extra.?secret(?:.?rare)?/gi,                                  code: 'EXSE' },
-  { pattern: /20thシークレットレア|20th.?secret(?:.?rare)?/gi,                                        code: '20thSE' },
-  { pattern: /10000シークレットレア|10000.?secret(?:.?rare)?/gi,                                      code: '10000SE' },
-  { pattern: /ゴールドシークレットレア|gold.?secret(?:.?rare)?/gi,                                     code: 'GSE' },
-  { pattern: /プレミアムゴールドレア|premium.?gold(?:.?rare)?/gi,                                     code: 'PG' },
-  { pattern: /グランドマスターレア|grand.?master(?:.?rare)?/gi,                                       code: 'GMR' },
-  { pattern: /ミレニアムシークレットレア|millennium.?secret(?:.?rare)?/gi,                             code: 'M+SE' },
-  { pattern: /ミレニアムウルトラレア|millennium.?ultra(?:.?rare)?/gi,                                  code: 'M+UR' },
-  { pattern: /ミレニアムスーパーレア|millennium.?super(?:.?rare)?/gi,                                  code: 'M+SR' },
-  { pattern: /ミレニアムレア|millennium.?rare/gi,                                           code: 'M' },
-  { pattern: /KCウルトラレア|kc.?ultra(?:.?rare)?/gi,                                                  code: 'KC+UR' },
-  { pattern: /シークレットパラレルレア|secret.?parallel(?:.?rare)?/gi,                                 code: 'P+SE' },
-  { pattern: /ウルトラパラレルレア|ultra.?parallel(?:.?rare)?/gi,                                      code: 'P+UR' },
-  { pattern: /スーパーパラレルレア|super.?parallel(?:.?rare)?/gi,                                      code: 'P+SR' },
-  { pattern: /ホログラフィックパラレルレア|holographic.?parallel(?:.?rare)?/gi,                        code: 'P+HR' },
-  { pattern: /ホログラフィックレア|holographic.?rare|ghost.?rare/gi,                        code: 'HR' },
-  { pattern: /コレクターズレア|collector'?s.?rare/gi,                                       code: 'CR' },
-  { pattern: /ゴールドレア|gold.?rare/gi,                                                   code: 'GR' },
-  { pattern: /アルティメットレア|ultimate.?rare|\bultimate\b/gi,                            code: 'UL' },
-  { pattern: /シークレットレア|secret.?rare|\bsecret\b/gi,                                  code: 'SE' },
-  { pattern: /ウルトラレア|ultra.?rare|\bultra\b/gi,                                        code: 'UR' },
-  { pattern: /スーパーレア|super.?rare|\bsuper\b/gi,                                        code: 'SR' },
-  { pattern: /ノーマルパラレル(?:レア)?|normal.?parallel(?:.?rare)?|N-Parallel/gi,                              code: 'P' },
-  { pattern: /ノーマルレア|normal.?rare/gi,                                                 code: 'NR' },
-];
-
-function normalizeRarity(rawRarity: string): string[] {
-  let remaining = rawRarity;
-  const results: string[] = [];
-
-  // Step1: 複合レアリティをスキャン・除去（スペース区切りでも検出できる）
-  for (const { pattern, code } of COMPOUND_RARITY_PATTERNS) {
-    // g フラグ付きの正規表現の test() は lastIndex を覚えていて、次の呼び出しで途中から探してしまう。
-    // そのため同じレアリティの行が続くと見落として「N」になることがあった。i フラグだけの新しい正規表現で判定する。
-    if (new RegExp(pattern.source, 'i').test(remaining)) {
-      if (!results.includes(code)) results.push(code);
-      remaining = remaining.replace(new RegExp(pattern.source, 'gi'), ' ');
-    }
-  }
-
-  // Step2: 残りをスペース・区切り文字で分割してノーマル・レアの単体判定
-  for (const part of remaining.split(/[\s\/／・\n,、]+/)) {
-    const t = part.trim();
-    if (!t) continue;
-    if (/^(ノーマル|N|Normal)$/i.test(t) && !results.includes('N')) results.push('N');
-    else if (/^(レア|R|Rare)$/i.test(t) && !results.includes('R')) results.push('R');
-  }
-
-  return results.length > 0 ? results : ['N'];
 }
 
 // ── 本文領域抽出 ─────────────────────────────────────────────────
@@ -149,18 +78,17 @@ function parseFromTables(html: string): RawEntry[] {
   const results: RawEntry[] = [];
 
   for (const tableHtml of findTopLevelTables(html)) {
-    const rowMatches = execAll(tableHtml, /<tr[^>]*>([\s\S]*?)<\/tr>/gi);
+    // 行・セルは extractElementContents で取り出す（閉じタグがなくても入力の長さに比例した時間で終わる。Q-2026-11-06-6）
+    const rows = extractElementContents(tableHtml, 'tr');
     let cardIdCol = -1, nameCol = -1, rarityCol = -1;
     const tableResults: RawEntry[] = [];
 
-    for (const rowMatch of rowMatches) {
-      const rowContent = rowMatch[1];
-
+    for (const rowContent of rows) {
       // ヘッダー行でカラム位置を検出
-      const thMatches = execAll(rowContent, /<th[^>]*>([\s\S]*?)<\/th>/gi);
-      if (thMatches.length > 0) {
-        thMatches.forEach((th, i) => {
-          const t = stripTags(th[1]);
+      const thCells = extractElementContents(rowContent, 'th');
+      if (thCells.length > 0) {
+        thCells.forEach((th, i) => {
+          const t = stripTags(th);
           if (/カード番号|番号|収録/.test(t)) cardIdCol = i;
           else if (/カード名/.test(t)) nameCol = i;
           else if (/レアリティ/.test(t)) rarityCol = i;
@@ -169,10 +97,9 @@ function parseFromTables(html: string): RawEntry[] {
       }
 
       // データ行
-      const tdMatches = execAll(rowContent, /<td[^>]*>([\s\S]*?)<\/td>/gi);
-      if (tdMatches.length < 2) continue;
+      const cellHtmls = extractElementContents(rowContent, 'td');
+      if (cellHtmls.length < 2) continue;
 
-      const cellHtmls = tdMatches.map(td => td[1]);
       const cellTexts = cellHtmls.map(stripTags);
 
       // 型番カラムを特定
@@ -224,8 +151,7 @@ function parseFromTables(html: string): RawEntry[] {
 // ── リストパーサー (UL/LI 形式、ストラクチャーデッキ等) ──────────
 function parseFromLists(html: string): RawEntry[] {
   const results: RawEntry[] = [];
-  for (const li of execAll(html, /<li[^>]*>([\s\S]*?)<\/li>/gi)) {
-    const liHtml = li[1];
+  for (const liHtml of extractElementContents(html, 'li')) {
     const text = stripTags(liHtml);
     const m = text.match(CARD_ID_RE);
     if (!m) continue;
@@ -252,6 +178,8 @@ function extractCategory(html: string): string {
 // ── アクセス制限 ─────────────────────────────────────────────────
 const ALLOWED_HOSTS = ['yugioh-wiki.net'];
 const MAX_REDIRECTS = 3;
+const FETCH_TIMEOUT_MS = 15_000;          // 取得全体（リダイレクトと本文の読み込みを含む）の制限時間
+const MAX_BODY_BYTES = 5 * 1024 * 1024;   // 取得するページの大きさの上限（5MB。Wiki のパックページは数百KB）
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
 
 // http(s) かつ許可ホスト（またはそのサブドメイン）のみ。ポート指定・認証情報付きURLは拒否
@@ -265,10 +193,10 @@ function isAllowedUrl(raw: string): boolean {
 }
 
 // リダイレクトを自前で追い、転送先も許可ホストかを毎回検査する（許可外なら null）
-async function fetchAllowed(url: string): Promise<Response | null> {
+async function fetchAllowed(url: string, signal: AbortSignal): Promise<Response | null> {
   let current = url;
   for (let i = 0; i <= MAX_REDIRECTS; i++) {
-    const res = await fetch(current, { headers: { 'User-Agent': USER_AGENT }, redirect: 'manual' });
+    const res = await fetch(current, { headers: { 'User-Agent': USER_AGENT }, redirect: 'manual', signal });
     if (res.status < 300 || res.status >= 400) return res;
     const location = res.headers.get('location');
     if (!location) return res;
@@ -278,7 +206,8 @@ async function fetchAllowed(url: string): Promise<Response | null> {
   return null;
 }
 
-// Authorization: Bearer <アクセストークン> を Supabase Auth で検証する。失敗時はエラー応答を返す
+// Authorization: Bearer <アクセストークン> を Supabase Auth で検証し、さらに DB関数 is_admin で
+// 管理者（admins 表に登録済み）かを確かめる（Q-2026-11-06-1）。失敗時はエラー応答を返す
 async function verifyAdmin(req: NextRequest): Promise<NextResponse | null> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -289,10 +218,22 @@ async function verifyAdmin(req: NextRequest): Promise<NextResponse | null> {
   if (!token) {
     return NextResponse.json({ error: 'ログインが必要です。' }, { status: 401 });
   }
-  const client = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
+  // is_admin を本人の権限で呼ぶため、アクセストークンを付けたクライアントを作る
+  const client = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
   const { data, error } = await client.auth.getUser(token);
   if (error || !data.user) {
     return NextResponse.json({ error: 'ログインの有効期限が切れています。再度ログインしてください。' }, { status: 401 });
+  }
+  const { data: isAdmin, error: adminError } = await client.rpc('is_admin');
+  if (adminError) {
+    console.error('Scrape API: is_admin の確認に失敗しました', adminError);
+    return NextResponse.json({ error: '管理者かどうかを確認できませんでした。時間をおいてもう一度お試しください。' }, { status: 503 });
+  }
+  if (isAdmin !== true) {
+    return NextResponse.json({ error: '管理者のみ利用できます。' }, { status: 403 });
   }
   return null;
 }
@@ -300,7 +241,7 @@ async function verifyAdmin(req: NextRequest): Promise<NextResponse | null> {
 // ── メインハンドラー ─────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
-    // 管理者（ログイン済み）のみ利用可能。第三者による踏み台利用を防ぐ
+    // 管理者（admins 表に登録済み）のみ利用可能。第三者による踏み台利用を防ぐ
     const authError = await verifyAdmin(req);
     if (authError) return authError;
 
@@ -311,16 +252,19 @@ export async function POST(req: NextRequest) {
     if (!isAllowedUrl(url)) {
       return NextResponse.json({ error: `取込できるのは ${ALLOWED_HOSTS.join(' / ')} のページのみです。` }, { status: 400 });
     }
-    const fetchResponse = await fetchAllowed(url);
+    // 取得先が応答しない・巨大なページを返す場合に備え、時間とサイズに上限を設ける（Q-2026-11-06-6）
+    const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    const fetchResponse = await fetchAllowed(url, signal);
     if (!fetchResponse) {
       return NextResponse.json({ error: '許可されていないURLへ転送されたため、取得を中止しました。' }, { status: 400 });
     }
     if (!fetchResponse.ok) {
-      return NextResponse.json({ error: `Failed to fetch URL: ${fetchResponse.statusText}` }, { status: 500 });
+      await fetchResponse.body?.cancel().catch(() => {});
+      return NextResponse.json({ error: `ページを取得できませんでした（HTTP ${fetchResponse.status}）。URLを確認してください。` }, { status: 502 });
     }
 
-    // yugioh-wiki.net はEUC-JPのため、ArrayBufferで取得してデコード
-    const buffer = await fetchResponse.arrayBuffer();
+    // yugioh-wiki.net はEUC-JPのため、バイト列で取得してデコード（上限を超えたら読むのをやめる）
+    const buffer = await readBodyWithLimit(fetchResponse, MAX_BODY_BYTES);
     const contentType = fetchResponse.headers.get('content-type') || '';
     const charsetMatch = contentType.match(/charset=([\w-]+)/i);
     const charset = charsetMatch ? charsetMatch[1].toLowerCase() : 'euc-jp';
@@ -356,10 +300,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ items });
 
   } catch (error) {
+    // 例外の内容はサーバーのログにだけ残し、応答には一般的な文言を返す（Q-2026-11-06-6）
     console.error('Scrape API Error:', error);
-    return NextResponse.json({
-      error: 'Failed to process request',
-      details: getErrorMessage(error)
-    }, { status: 500 });
+    if (error instanceof BodyTooLargeError) {
+      return NextResponse.json({ error: 'ページが大きすぎるため取り込めません（上限 5MB）。' }, { status: 413 });
+    }
+    const name = error instanceof Error || error instanceof DOMException ? error.name : '';
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      return NextResponse.json({ error: `取得先が${FETCH_TIMEOUT_MS / 1000}秒以内に応答しなかったため中止しました。時間をおいてもう一度お試しください。` }, { status: 504 });
+    }
+    return NextResponse.json({ error: '取込の処理中にエラーが発生しました。時間をおいてもう一度お試しください。' }, { status: 500 });
   }
 }

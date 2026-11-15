@@ -1,7 +1,9 @@
-// 招待リンク（/?invite=コード）の招待コードをブラウザに保存する
+// 招待リンク（/#invite=コード。以前の /?invite=コード も読む）の招待コードをブラウザに保存する
 // 招待コードは Supabase への全リクエストに x-invite-code ヘッダーとして付与され、
 // DB側（RLS・DB関数）で有効期限・取消を検証する（lib/supabase.ts 参照）
 // localStorage はプライベートブラウズ等で使えない場合があるため、失敗時はメモリ上で保持する
+
+import { buildSecretUrl, takeSecretParam } from './urlSecret';
 
 const STORAGE_KEY = 'card-manager:invite';
 const URL_PARAM = 'invite';
@@ -35,18 +37,16 @@ export function clearInviteCode(): void {
   }
 }
 
-// URLの ?invite= を取り込み、アドレスバー・履歴からは取り除く。
+// URLの #invite=（以前のリンクは ?invite=）を取り込み、アドレスバー・履歴からは取り除く（Q-2026-11-06-7）。
 // Supabase への最初の通信より前に招待コードを保存するため、クライアント生成時に呼ぶ
 export function captureInviteFromUrl(): void {
   if (typeof window === 'undefined') return;
-  const url = new URL(window.location.href);
-  const code = url.searchParams.get(URL_PARAM)?.trim();
-  if (!code) return;
-  saveInviteCode(code);
-  url.searchParams.delete(URL_PARAM);
-  window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+  const { value, cleanedUrl } = takeSecretParam(window.location.href, URL_PARAM);
+  if (cleanedUrl !== null) window.history.replaceState(window.history.state, '', cleanedUrl);
+  if (value) saveInviteCode(value);
 }
 
+// 招待リンク。コードは fragment で渡す（サーバーに送られず、アクセスログに残らない）
 export function buildInviteUrl(code: string): string {
-  return `${window.location.origin}/?${URL_PARAM}=${encodeURIComponent(code)}`;
+  return buildSecretUrl(window.location.origin, '/', URL_PARAM, code);
 }

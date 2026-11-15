@@ -1,14 +1,15 @@
 
 'use client';
 
-import React, { useState, useEffect, useRef, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { InventoryList } from '@/views/InventoryList';
 import { useAppContext } from '@/context/AppContext';
-import { api } from '@/services/api';
+import { api, ItemFilters } from '@/services/api';
 import { Item, SortConfig } from '@/types';
 import { LoaderCircle } from 'lucide-react';
 import { getErrorCode, getErrorMessage } from '@/utils';
+import { DEFAULT_INVENTORY_SORT, getSavedInventorySort, saveInventorySort } from '@/lib/sortPreference';
 
 function InventoryPageContent() {
   const { isAdmin, handleLoginToggle, news, isLoading, addToast, setIsLoading, products, rarities, selectedRarities, setSelectedRarities, showOnlyInStock } = useAppContext();
@@ -22,7 +23,15 @@ function InventoryPageContent() {
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 50;
   
-  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'releaseDate', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState<SortConfig>(DEFAULT_INVENTORY_SORT);
+
+  // 保存した並び順を復元する。localStorage はサーバー描画時に読めないため、ハイドレーション後に読む。
+  // データ取得は 300ms 待ってから行い、待つ間に並び順が変われば取り消すため、復元しても二重取得にはならない
+  useEffect(() => {
+    const saved = getSavedInventorySort();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage はサーバー描画時に読めないため、ハイドレーション後に読む
+    setSortConfig(current => (current.key === saved.key && current.direction === saved.direction ? current : saved));
+  }, []);
 
   const categoryParam = searchParams.get('category');
   const selectedCategory = categoryParam ? decodeURIComponent(categoryParam) : null;
@@ -39,22 +48,26 @@ function InventoryPageContent() {
     if (selectedCategory) setSelectedRarities([]);
   }, [selectedCategory, setSelectedRarities]);
 
+  // 在庫一覧の検索条件（一覧の取得と CSV の全件出力で同じものを使う）
+  const itemFilters = useMemo<ItemFilters>(() => ({
+    category: selectedCategory,
+    search: searchKeyword,
+    showZeroStock: !showOnlyInStock,
+    rarities: selectedRarities.length > 0 ? selectedRarities : undefined,
+    rarityOrder: rarities.length > 0 ? rarities : undefined,
+  }), [selectedCategory, searchKeyword, showOnlyInStock, selectedRarities, rarities]);
+
+  // CSV出力用: 検索条件に一致する全件を、一覧と同じ並び順で取得する
+  const fetchAllFilteredItems = useCallback(
+    () => api.fetchAllMatchingItems(itemFilters, sortConfig),
+    [itemFilters, sortConfig]
+  );
+
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true);
       try {
-        const result = await api.fetchItems(
-          currentPage,
-          pageSize,
-          {
-            category: selectedCategory,
-            search: searchKeyword,
-            showZeroStock: !showOnlyInStock,
-            rarities: selectedRarities.length > 0 ? selectedRarities : undefined,
-            rarityOrder: rarities.length > 0 ? rarities : undefined,
-          },
-          sortConfig
-        );
+        const result = await api.fetchItems(currentPage, pageSize, itemFilters, sortConfig);
         setItems(result.data);
         setTotalCount(result.count);
         // 仮減らし在庫の取得（失敗しても無視）
@@ -75,19 +88,23 @@ function InventoryPageContent() {
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [addToast, setIsLoading, currentPage, pageSize, selectedCategory, searchKeyword, sortConfig, showOnlyInStock, selectedRarities, rarities]);
+  }, [addToast, setIsLoading, currentPage, pageSize, itemFilters, sortConfig]);
 
-  const handleSort = (key: keyof Item | 'releaseDate') => {
-    setSortConfig(current => ({
-      key,
-      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
-    }));
+  const applySortConfig = (next: SortConfig) => {
+    setSortConfig(next);
+    saveInventorySort(next);
     setCurrentPage(1);
   };
 
+  const handleSort = (key: keyof Item | 'releaseDate') => {
+    applySortConfig({
+      key,
+      direction: sortConfig.key === key && sortConfig.direction === 'asc' ? 'desc' : 'asc'
+    });
+  };
+
   const setSortDirectly = (key: keyof Item | 'releaseDate', direction: 'asc' | 'desc') => {
-    setSortConfig({ key, direction });
-    setCurrentPage(1);
+    applySortConfig({ key, direction });
   };
 
   const updateStock = async (id: number, delta: number) => {
@@ -200,6 +217,7 @@ function InventoryPageContent() {
       onUpdateItem={handleUpdateItem}
       onDeleteItem={handleDeleteItem}
       pendingQuantities={pendingQuantities}
+      fetchAllFilteredItems={fetchAllFilteredItems}
     />
   );
 }
