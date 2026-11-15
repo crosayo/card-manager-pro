@@ -79,7 +79,6 @@ export const RequestsView: React.FC = () => {
 
   // 完了モーダル状態（管理者用）
   const [completingRequest, setCompletingRequest] = useState<CardRequest | null>(null);
-  const [unitPrices, setUnitPrices] = useState<Record<number, number>>({});
   const [adminMemo, setAdminMemo] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
 
@@ -454,21 +453,14 @@ export const RequestsView: React.FC = () => {
 
   const openCompleteModal = (req: CardRequest) => {
     setCompletingRequest(req);
-    const prices: Record<number, number> = {};
-    req.items?.forEach(ri => { prices[ri.id] = ri.unitPrice ?? 0; });
-    setUnitPrices(prices);
     setAdminMemo('');
   };
-
-  const priceTotal = Object.values(unitPrices).reduce((sum, p) => sum + (p || 0), 0);
 
   const confirmComplete = async () => {
     if (!completingRequest) return;
     setIsUpdating(true);
     try {
       const updated = await api.updateRequestStatus(completingRequest.id, 'completed', {
-        unitPrices,
-        priceTotal,
         adminMemo,
       });
 
@@ -853,7 +845,7 @@ export const RequestsView: React.FC = () => {
                               </div>
                             )}
                           </div>
-                          <span className="font-bold text-slate-600 shrink-0">{ri.quantity}枚{ri.unitPrice ? ` (¥${ri.unitPrice.toLocaleString()})` : ''}</span>
+                          <span className="font-bold text-slate-600 shrink-0">{ri.quantity}枚</span>
                         </div>
                       ))}
                     </div>
@@ -862,10 +854,6 @@ export const RequestsView: React.FC = () => {
                       <div className="bg-slate-50 rounded px-3 py-2 text-sm text-slate-600 mb-3">
                         <span className="text-slate-400 text-xs">メモ: </span>{req.message}
                       </div>
-                    )}
-
-                    {req.priceTotal && (
-                      <div className="text-sm font-bold text-slate-700 mb-2">合計: ¥{req.priceTotal.toLocaleString()}</div>
                     )}
 
                     {req.adminMemo && (
@@ -992,7 +980,7 @@ export const RequestsView: React.FC = () => {
               <button onClick={() => setCompletingRequest(null)} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
             </div>
             <div className="p-5 space-y-4">
-              {/* 単価入力 */}
+              {/* 完了するカード・サプライ */}
               <div className="space-y-2">
                 {completingRequest.items?.map(ri => (
                   <div key={ri.id} className="flex items-center gap-3">
@@ -1007,22 +995,8 @@ export const RequestsView: React.FC = () => {
                         </div>
                       )}
                     </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-sm text-slate-500">¥</span>
-                      <input
-                        type="number"
-                        min={0}
-                        value={unitPrices[ri.id] ?? 0}
-                        onChange={(e) => setUnitPrices(prev => ({ ...prev, [ri.id]: Number(e.target.value) }))}
-                        className="w-24 border border-slate-300 rounded px-2 py-1 text-sm text-right"
-                      />
-                    </div>
                   </div>
                 ))}
-              </div>
-
-              <div className="bg-slate-50 rounded px-3 py-2 text-right font-bold text-slate-800">
-                合計: ¥{priceTotal.toLocaleString()}
               </div>
 
               <div>
