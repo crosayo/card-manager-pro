@@ -40,7 +40,7 @@ declare
   v_left integer;
 begin
   -- 0. 入力の確認
-  if v_email is null or btrim(v_email) = '' or v_email = 'ここに管理者のメールアドレス' or position('@' in v_email) = 0 then
+  if v_email is null or btrim(v_email) = '' or v_email like 'ここに%' or position('@' in v_email) = 0 then
     raise exception '中止: 先頭の v_email を管理者のメールアドレスに書き換えてから実行してください（何も変更していません）';
   end if;
   select u.id, coalesce(u.is_anonymous, false) into v_uid, v_anon
